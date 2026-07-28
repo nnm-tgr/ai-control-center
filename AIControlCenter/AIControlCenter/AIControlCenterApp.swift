@@ -11,7 +11,11 @@ import SwiftUI
 struct AIControlCenterApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            DashboardView()
+        }
+        .defaultSize(width: 1100, height: 680)
+        .commands {
+            CommandGroup(replacing: .newItem) {}
         }
     }
 }
