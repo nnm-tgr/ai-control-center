@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct DashboardView: View {
+    @Environment(AppState.self) private var appState
     @State private var viewModel = DashboardViewModel()
     @FocusState private var isSearchFocused: Bool
 
@@ -225,11 +226,13 @@ struct DashboardView: View {
 
 #Preview("Dashboard — Mock Data") {
     DashboardView()
+        .environment(AppState())
         .frame(width: 1000, height: 600)
 }
 
 #Preview("Dashboard — Dark Mode") {
     DashboardView()
+        .environment(AppState())
         .frame(width: 1000, height: 600)
         .preferredColorScheme(.dark)
 }
