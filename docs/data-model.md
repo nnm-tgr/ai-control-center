@@ -171,6 +171,20 @@ enum StatusGroup {
 
 各 Agent につき最大 **200件** の Activity を保持。超過分は古い順に削除。
 
+### 格納順序とパフォーマンス
+
+`activities` 配列は **古い順（追記順）** で保持する。
+
+```
+activities[0]   ← 最も古いエントリ（最初に状態変化した記録）
+activities[N-1] ← 最新のエントリ（直近の状態変化）
+```
+
+**理由**: 末尾への `append` は O(1)（amortized）。先頭への `insert(at: 0)` は O(N) のメモリシフトが発生するため避ける。  
+UI（ActivityTimelineView）では「新しい順」に表示するが、これは View 側で `activities.reversed()` を呼ぶことで対処する。`ReversedCollection` はコピーが発生しない O(1) 操作であるため、パフォーマンスに影響しない。
+
+最大件数超過時の `removeFirst()`（最古エントリ削除）は O(N) だが、200件を超えてから1回だけ発生するため実用上問題なし。`architecture.md § 8.5` も参照。
+
 ---
 
 ## AppNotification

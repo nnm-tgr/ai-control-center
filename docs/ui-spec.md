@@ -43,6 +43,7 @@ Swift 6 + SwiftUI。最小ターゲット: macOS 14 Sonoma。
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │ [AI Control Center]          [Filter ▼] [Sort ▼] [+] [⚙]   │  ← Toolbar
+│                 [🔍 Search projects and tasks...          ]  │  ← Search Bar
 ├──────────────────────────────────────────────────────────────┤
 │ PROJECT          AGENT         STATUS        ELAPSED  BRANCH │  ← Header
 ├──────────────────────────────────────────────────────────────┤
@@ -58,6 +59,9 @@ Swift 6 + SwiftUI。最小ターゲット: macOS 14 Sonoma。
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
 ```
+
+検索バーはツールバー直下に常時表示する（`⌘F` フォーカス前はプレースホルダーのみ表示）。  
+検索中は Filter / Sort メニューとの AND 条件で絞り込む。
 
 ### 表示カラム
 
@@ -91,7 +95,8 @@ Swift 6 + SwiftUI。最小ターゲット: macOS 14 Sonoma。
 | 右クリック | コンテキストメニュー表示 |
 | `⌘R` | 手動リフレッシュ（全プロジェクト再スキャン） |
 | `⌘,` | Settings を開く |
-| `⌘F` | フィルター入力にフォーカス |
+| `⌘F` | 検索バーにフォーカス（インクリメンタルサーチ開始） |
+| `Escape` | 検索バーをクリアしてフォーカスを解除 |
 | `↑↓` | 行選択移動 |
 | `Enter` | 選択行の Detail を開く |
 | `Space` | ターミナルジャンプ（Quick Look 的に） |
@@ -121,6 +126,70 @@ Remove from Dashboard
 
 ```
 [Sort ▼]  →  Status Priority / Project Name / Last Updated / Elapsed Time
+```
+
+### 検索（インクリメンタルサーチ）
+
+#### 対象フィールド
+
+| フィールド | 優先度 | 例 |
+|-----------|--------|-----|
+| プロジェクト名 (`Project.name`) | 高 | `"Clinic System"` |
+| 現在のタスク (`Agent.currentTask`) | 高 | `"Refactoring AuthService"` |
+| ブランチ名 (`Agent.branch`) | 中 | `"feature/auth-jwt"` |
+| エージェント種別 (`AgentType.displayName`) | 低 | `"Claude Code"` |
+
+#### 検索仕様
+
+- **インクリメンタル**: 1文字入力するたびにリストが即座に絞り込まれる（デバウンスなし）
+- **大文字小文字非区別**: `"clinic"` で `"Clinic System"` にマッチ
+- **部分一致**: 先頭一致ではなく任意位置のマッチ
+- **AND 条件**: フィルター（Status 絞り込み）とソートは検索と同時に適用される
+- **ハイライト**: マッチした文字列部分を `.yellow` でハイライト表示（`AttributedString` を使用）
+
+#### 検索バーの状態
+
+| 状態 | 表示 |
+|------|------|
+| 未フォーカス・空 | プレースホルダー `"Search projects and tasks..."` をグレーで表示 |
+| フォーカス中・空 | カーソルのみ。リストは絞り込まれない |
+| 入力中 | マッチする行のみ表示。マッチ文字をハイライト |
+| 0件マッチ | `"No results for 'xxx'"` を中央に表示（空状態とは別の表示） |
+
+#### 0件マッチの空状態
+
+```
+┌────────────────────────────────────┐
+│                                    │
+│    No results for "auth"           │
+│                                    │
+│    Try clearing the search or      │
+│    changing the filter.            │
+│                                    │
+│    [Clear Search]                  │
+│                                    │
+└────────────────────────────────────┘
+```
+
+#### DashboardViewModel への追加
+
+```
+// 追加プロパティ
+var searchText: String = ""
+var isSearchFocused: Bool = false
+
+// 既存の filteredProjects を拡張
+var displayedProjects: [Project] {
+    let afterFilter = filteredProjects   // 既存のフィルター適用済み
+    guard !searchText.isEmpty else { return afterFilter }
+    return afterFilter.filter { project in
+        let query = searchText.lowercased()
+        return project.name.lowercased().contains(query)
+            || project.primaryAgent?.currentTask?.lowercased().contains(query) == true
+            || project.primaryAgent?.branch?.lowercased().contains(query) == true
+            || project.primaryAgent?.agentType.displayName.lowercased().contains(query) == true
+    }
+}
 ```
 
 ### 空状態（プロジェクトがゼロ）

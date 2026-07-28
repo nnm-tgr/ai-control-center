@@ -170,6 +170,64 @@ Combine の `Publisher` にすることも検討したが、Swift 6 では `asyn
 
 ---
 
+### FSEventStream イベントフィルタリング
+
+FSEventStream のコールバックは Root ディレクトリ配下のあらゆる変更（`.git` のオブジェクト更新、`node_modules` のインストール中など）に対して発火する。  
+後続の JSON デコード処理を不必要に走らせないため、**コールバック内で即座に破棄する二段階フィルタリング**を実施する。
+
+#### Stage 1: パスベース早期破棄（FSEventStream コールバック内）
+
+```
+// コールバックで受け取ったパスに対して順に評価
+// いずれかに一致したら Continuation.yield を呼ばず即 return
+
+除外パスセグメント（デフォルト。Settings の excludedDirectoryNames と同期）:
+  ".git", "node_modules", ".build", "DerivedData",
+  ".swiftpm", "__pycache__", ".venv", "vendor",
+  "Pods", "Carthage", "dist", "build", ".gradle"
+
+判定ロジック:
+  path.pathComponents.contains(where: excludedSegments.contains)
+  → true なら破棄
+```
+
+#### Stage 2: 拡張子・ファイル名フィルタリング（アトミック書き込み対応）
+
+エージェントは `.tmp` ファイルへの書き込み後にリネームする仕様（status-contract.md 参照）。  
+リネーム前の `.tmp` ファイルに対するイベントで JSON デコードが走らないよう、**ファイル名が厳密に `agent-status.json` である場合のみ** 後続処理へ渡す。
+
+```
+許可するファイル名（完全一致）:
+  "agent-status.json"
+
+破棄するケース:
+  - 末尾が ".tmp" （例: agent-status.json.tmp）
+  - 末尾が ".swp" （vim の swap ファイル）
+  - ファイル名が "." で始まる隠しファイル
+  - ディレクトリ自体への変更イベント（kFSEventStreamEventFlagItemIsDir）
+
+判定ロジック:
+  let filename = URL(fileURLWithPath: path).lastPathComponent
+  guard filename == "agent-status.json" else { return }
+```
+
+#### フィルタリング後のイベント処理フロー
+
+```mermaid
+flowchart TD
+    A[FSEventStream コールバック\n変更パス受信] --> B{Stage 1\n除外パスセグメント\n含む?}
+    B -->|Yes| C[破棄 — return]
+    B -->|No| D{Stage 2\nファイル名 ==\nagent-status.json?}
+    D -->|No| E[破棄 — return]
+    D -->|Yes| F[AsyncStream.Continuation.yield]
+    F --> G[StatusParserService\nJSON decode]
+```
+
+**Design Decision #11**: Stage 1 の除外リストは `Settings.excludedDirectoryNames` と同一のものを参照する。  
+ユーザーが Settings でリストを変更した場合、次回の FSEventStream 再起動時（またはホットリロード）に反映される。コールバック内でのリスト参照は `@Sendable` クロージャ内になるため、`Set<String>` として値コピーして渡す。
+
+---
+
 ## 5. 状態管理
 
 ```mermaid
@@ -294,6 +352,62 @@ flowchart TD
     F --> M[@Observable\n自動伝播]
     M --> N[SwiftUI View\n再描画]
 ```
+
+---
+
+## 8.5 Activity 履歴のパフォーマンス設計
+
+### 問題
+
+`Agent.activities` に新しいエントリを先頭挿入（`insert(at: 0)`）すると、配列全体のメモリシフトが発生する。  
+エージェントが頻繁に状態変化する場合（thinking ↔ running_command を繰り返す）、最大 200 件の配列先頭挿入が連続し、UI の再描画とも重なってボトルネックになりうる。
+
+### 採用方針: 追記（末尾 append）＋ UI 側の逆順表示
+
+```
+Agent.activities は「古い順（追記順）」で保持する。
+  activities[0]  → 最も古い Activity
+  activities[N]  → 最新の Activity
+
+UIレイヤ（ActivityTimelineView）で逆順にして表示する:
+  activities.reversed() または .suffix(200).reversed()
+```
+
+**理由**: 
+- `append` は O(1)（amortized）。`insert(at: 0)` は O(N)。
+- `Array.reversed()` は `ReversedCollection<Array>` を返し、**コピーが発生しない**（O(1)）。
+- `LazyVStack` と組み合わせることで、スクロールアウトした行は描画されない。
+
+### 最大件数の管理（末尾追記モデル）
+
+```
+mutating func appendActivity(_ activity: Activity) {
+    activities.append(activity)
+    if activities.count > maxCount {
+        activities.removeFirst()   // 古い順なので先頭が最古 → O(N) だが最大1回/追記
+    }
+}
+```
+
+古い件数を超えた場合の `removeFirst()` は O(N) だが、発生頻度は低く（200件超えてから）、かつ1回だけなので許容範囲。
+
+### UI レイヤの最適化
+
+```swift
+// ActivityTimelineView での表示
+LazyVStack(spacing: 0) {
+    ForEach(agent.activities.reversed()) { activity in
+        ActivityRowView(activity: activity)
+            .id(activity.id)   // 安定した identity で SwiftUI の差分検出を助ける
+    }
+}
+```
+
+`ForEach` に `\.id` で安定 identity を渡すことで、新しい Activity が追加されたとき既存行が再レンダリングされず、**先頭の1行のみ差分更新**される。
+
+### 将来最適化（v1.2 以降）
+
+200 件を大幅に超えるケースが発生した場合は、`Deque`（Swift Collections パッケージ）の採用を検討する。ただし外部ライブラリ導入になるため、MVP では標準 `Array` で十分。
 
 ---
 

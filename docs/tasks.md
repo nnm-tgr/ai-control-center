@@ -90,16 +90,18 @@ Claude Code が実装できる粒度まで分解したタスク一覧。
   - `struct Activity: Identifiable, Sendable, Hashable`
   - 全プロパティを `data-model.md` に従って定義
   - `var formattedTimestamp: String`（HH:mm 形式、昨日以前は MM/dd HH:mm）
+  - **【注意】格納順序**: `activities` は古い順（追記順）で保持。UI では `.reversed()` で表示する
 
 #### Story S0.2.5 — Agent
 
 - [ ] **T016** `Core/Models/Agent.swift` を作成
   - `struct Agent: Identifiable, Sendable, Hashable`
   - 全プロパティを `data-model.md` に従って定義
-  - `var previousStatus: AgentStatus?`（activities.first?.status）
+  - `var previousStatus: AgentStatus?`（`activities.last?.status` — 末尾が最新）
   - `var elapsedSinceLastChange: TimeInterval`
   - `var needsAttention: Bool`（`status == .waitingUser || status == .error`）
-  - `mutating func appendActivity(_ activity: Activity)`（最大 200件 制限付き）
+  - `mutating func appendActivity(_ activity: Activity)`（末尾 append、最大 200件 — 超過時は `removeFirst()`）
+  - **【注意】** `activities[0]` が最古、`activities.last` が最新。UI で逆順表示すること
 
 #### Story S0.2.6 — GitStatus
 
@@ -182,6 +184,11 @@ Claude Code が実装できる粒度まで分解したタスク一覧。
   - `struct Event: Sendable { url: URL, flags: FSEventStreamEventFlags, eventID: FSEventStreamEventId }`
   - `latency: CFTimeInterval = 0.5`（変更後 0.5秒でコールバック。必要なら調整）
   - `flags: FSEventStreamCreateFlags = [.useCFTypes, .fileEvents, .watchRoot]`
+  - **【追加】Stage 1 フィルタリング**: コールバック内でパスセグメントに除外名が含まれる場合は即 return
+    - 除外セグメントは `Set<String>` として値コピーして渡す（`@Sendable` クロージャ内でのアクセスを安全にする）
+  - **【追加】Stage 2 フィルタリング**: `lastPathComponent != "agent-status.json"` なら即 return
+    - `.tmp`, `.swp` など一時ファイルのイベントをここで破棄
+    - `kFSEventStreamEventFlagItemIsDir` フラグが立っている場合も破棄
 
 - [ ] **T031** `Core/Infrastructure/AsyncFSEventStream.swift` を作成
   - `FSEventStreamWrapper` を `AsyncStream<FSEventStreamWrapper.Event>` にブリッジ
@@ -282,6 +289,7 @@ Claude Code が実装できる粒度まで分解したタスク一覧。
   - `@Observable @MainActor final class AppState`
   - `private(set) var projects: [Project] = []`
   - `private(set) var recentErrors: [AppError] = []`
+  - **【追加】** `private(set) var pendingBanners: [BannerMessage] = []`（フォールバック通知などに使用）
   - `var settings: Settings`（SettingsStore から読み込み）
   - `func startMonitoring() async`（Discovery + Watcher のメインループ）
   - `func stopMonitoring()`
@@ -289,6 +297,8 @@ Claude Code が実装できる粒度まで分解したタスク一覧。
   - `func updateAgentStatus(projectID: UUID, agentStatusFile: AgentStatusFile)`
   - `func removeProject(id: UUID)`
   - `func addError(_ error: AppError)`
+  - **【追加】** `func addBanner(_ banner: BannerMessage)` / `func dismissBanner(id: UUID)`
+  - `struct BannerMessage: Identifiable, Sendable` — `id, message: String, level: BannerLevel, autoDismissAfter: TimeInterval?`
 
 - [ ] **T061** `AppStateTests.swift` を作成
   - Mock サービスを使って `upsertProject` テスト
@@ -305,6 +315,10 @@ Claude Code が実装できる粒度まで分解したタスク一覧。
   - `@Observable @MainActor final class DashboardViewModel`
   - `var sortedProjects: [Project]`（AppState の projects を sortOrder でソート）
   - `var filteredProjects: [Project]`（filterStatus でフィルタリング後）
+  - **【追加】** `var searchText: String = ""`（インクリメンタルサーチ用）
+  - **【追加】** `var displayedProjects: [Project]`（filteredProjects にサーチを適用した最終リスト）
+    - `searchText.isEmpty` なら `filteredProjects` をそのまま返す
+    - 非空なら `project.name`, `agent.currentTask`, `agent.branch`, `agentType.displayName` で部分一致フィルタ（大文字小文字非区別）
   - `var sortOrder: SortOrder`
   - `var filterStatus: AgentStatus?`
   - `var selectedProjectID: UUID?`
@@ -353,8 +367,11 @@ Claude Code が実装できる粒度まで分解したタスク一覧。
   - `@Environment(AppState.self) var appState`
   - `@State private var viewModel = DashboardViewModel()`
   - `NavigationSplitView` でリストと Detail を分割（サイドバーなし、2カラム）
-  - `List` で `AgentRowView` を並べる
+  - `List` で `AgentRowView` を並べる（`viewModel.displayedProjects` を使用）
   - ツールバー: タイトル、フィルターメニュー、ソートメニュー、設定ボタン
+  - **【追加】** ツールバー直下に `SearchBar`（`TextField` ベース）を常時表示
+    - `⌘F` でフォーカス（`.focusedValue` または `@FocusState` を使用）
+    - `Escape` でクリア＆フォーカス解除
   - `Table` ではなく `List` を使用（カスタム行レイアウトのため）
 
 - [ ] **T077** フィルターメニューを実装
@@ -406,6 +423,7 @@ Claude Code が実装できる粒度まで分解したタスク一覧。
   - 中: タイムスタンプ + ステータス名 + タスク名
   - 右: duration テキスト（`(3m 12s)`）
   - `isLatest` の場合は `← current` バッジを表示
+  - **【注意】** `ForEach` に `.id(activity.id)` を付与して安定 identity を確保（不要な再描画を防ぐ）
 
 #### Story S1.5.3 — AgentDetailView
 
@@ -415,6 +433,8 @@ Claude Code が実装できる粒度まで分解したタスク一覧。
   - ヘッダーセクション: エージェント名、プロジェクト名、ブランチ、起動時刻、経過時間
   - Current Task セクション: `project.primaryAgent?.currentTask`
   - Activity セクション: `ScrollView` + `LazyVStack` + `ActivityRowView`
+    - **【追加】** `agent.activities.reversed()` で逆順表示（コピーなし O(1)）
+    - `ForEach` に `\.id` を明示して差分更新を最小化
   - ツールバーに `Jump to Terminal` ボタン
   - `project` が nil のとき: placeholder 表示
 
@@ -455,20 +475,33 @@ Claude Code が実装できる粒度まで分解したタスク一覧。
 
 - [ ] **T113** `Core/Services/Terminal/TerminalAppProvider.swift` を作成
   - Terminal.app の AppleScript 実装
+  - `supportsFallback = true` を実装（Automation 権限拒否時にフォールバック可能）
   - `Core/Infrastructure/AppleScriptRunner.swift` を先に作成すること
 
 - [ ] **T114** `Core/Infrastructure/AppleScriptRunner.swift` を作成
   - `func run(script: String) async throws -> String`
   - `NSAppleScript` を async でラップ
+  - エラーコードが `-1743`（Automation 権限拒否）の場合 `TerminalProviderError.automationPermissionDenied` を throw
+
+- [ ] **T114b** `Core/Services/Terminal/FallbackTerminalJump.swift` を作成 **【追加】**
+  - `struct FallbackTerminalJump`
+  - `static func execute(workingDirectory: URL, terminalBundleID: String)`
+    - `NSPasteboard.general` に `cd '<path>'` コマンドをコピー
+    - `NSWorkspace.shared.urlForApplication(withBundleIdentifier:)` でアプリ URL 取得
+    - `NSWorkspace.shared.open(appURL)` でターミナルを起動
+  - `extension String { var shellEscaped: String }` を同ファイルに追加
+    - シングルクォートラップ（スペース・特殊文字を含むパスのエスケープ）
 
 - [ ] **T115** `Core/Services/Terminal/ITerm2Provider.swift` を作成
+  - `supportsFallback = true` を実装
 
 - [ ] **T116** `Core/Services/Terminal/GhosttyProvider.swift` を作成
 
 - [ ] **T117** `Dashboard/DashboardView.swift` にターミナルジャンプを接続
   - `AgentRowView` のダブルクリック → `viewModel.jumpToTerminal(project:)` を呼ぶ
-  - Automation 権限エラーを `AppState.addError` へ伝搬
-  - `AlertView` でエラー表示
+  - `automationPermissionDenied` の場合 → `FallbackTerminalJump.execute()` を呼ぶ
+  - フォールバック実行後、インラインバナー（`AppState.pendingBanners`）で「cd をコピーした」旨を表示
+  - その他エラーは `AppState.addError` へ伝搬して `AlertView` 表示
 
 ### Epic 2.3: Settings
 

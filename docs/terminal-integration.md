@@ -65,6 +65,16 @@ enum TerminalProviderError: Error {
     case activationFailed(reason: String)
     case appleScriptError(message: String)
     case urlSchemeNotSupported
+    case automationPermissionDenied(terminalName: String)  // ← 追加
+}
+
+// TerminalProvider にフォールバック能力を示すプロパティを追加
+protocol TerminalProvider {
+    // ...（既存プロパティ）...
+
+    // Automation 権限なしでも最低限の動作を提供できるか
+    // true の場合、automationPermissionDenied 時にクリップボード fallback を実行
+    var supportsFallback: Bool { get }
 }
 ```
 
@@ -281,14 +291,106 @@ AppleScript を使用するターミナル（Terminal.app, iTerm2）は macOS �
 初回 AppleScript 実行時:
   → macOS がシステムダイアログを表示
   → "AI Control Center は Terminal.app を制御しようとしています"
-  → ユーザーが OK → 権限付与
-  → ユーザーが Cancel → TerminalProviderError.activationFailed
+  → ユーザーが OK → 権限付与 → 通常フロー継続
+  → ユーザーが Cancel → TerminalProviderError.automationPermissionDenied
 
 権限は System Settings > Privacy & Security > Automation で確認・変更可能
 ```
 
-**設計対応**:
-- 権限拒否時は「Settings を開く」ボタンで System Settings へ誘導
+---
+
+## Automation 権限拒否時のフォールバック
+
+### フォールバック方針
+
+AppleScript が使えない場合でも、ユーザーが手間なくターミナルへ移動できるよう  
+**クリップボードコピー + ターミナル起動** の2ステップフォールバックを実施する。
+
+### フォールバックフロー
+
+```mermaid
+flowchart TD
+    A[TerminalJump 実行] --> B[AppleScript 実行]
+    B --> C{Automation 権限\nあるか?}
+    C -->|Yes| D[通常フロー\nターミナルにフォーカス]
+    C -->|No → automationPermissionDenied| E[FallbackTerminalJump を実行]
+    E --> F["cd /path/to/project"\nをクリップボードにコピー\nNSPasteboard.general.setString]
+    F --> G[ターミナルアプリを起動\nNSWorkspace.shared.open(terminalURL)]
+    G --> H[トースト通知を表示\n「cd コマンドをコピーしました」]
+```
+
+### フォールバック実装仕様
+
+```
+struct FallbackTerminalJump {
+
+    // クリップボードに cd コマンドをコピーし、ターミナルを起動する
+    // AppleScript が使えない場合のセーフフォールバック
+    static func execute(workingDirectory: URL,
+                        terminalBundleID: String) {
+        // 1. cd コマンドをクリップボードにコピー
+        let cdCommand = "cd \(workingDirectory.path.shellEscaped)"
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(cdCommand, forType: .string)
+
+        // 2. ターミナルアプリを起動（権限不要の方法）
+        if let appURL = NSWorkspace.shared.urlForApplication(
+            withBundleIdentifier: terminalBundleID
+        ) {
+            NSWorkspace.shared.open(appURL)
+        }
+
+        // 3. UI 通知（トースト）を表示
+        //    "cd command copied to clipboard. Paste it in the terminal."
+    }
+}
+
+// String の shell エスケープヘルパー
+// スペースや特殊文字を含むパスを安全に扱う
+extension String {
+    var shellEscaped: String {
+        // シングルクォートでラップし、内部のシングルクォートをエスケープ
+        "'\(self.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+}
+```
+
+### フォールバック時の UI 表示
+
+フォールバックが実行された場合、Dashboard に **インラインバナー** を表示する。
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ ⚠  Automation permission denied for Terminal.app        │
+│    cd command copied to clipboard — paste it manually.  │
+│                                        [Open Settings]  │
+└─────────────────────────────────────────────────────────┘
+```
+
+- バナーは 8秒後に自動消去（または `×` ボタンで手動消去）
+- `[Open Settings]` → `System Settings > Privacy & Security > Automation` を開く
+- バナーは `AppState.recentErrors` の `AppError.Terminal.automationFallbackUsed` として記録
+
+### TerminalService でのエラーハンドリング統合
+
+```
+TerminalService.activate(workingDirectory:, settings:):
+  1. 選択プロバイダーの activate() を try
+  2. catch TerminalProviderError.automationPermissionDenied:
+       a. provider.supportsFallback が true なら FallbackTerminalJump.execute() を呼ぶ
+       b. AppState.addError(.terminal(.automationFallbackUsed))
+       c. バナー表示のため AppState.pendingBanners に追記
+  3. catch その他:
+       a. AppState.addError(.terminal(.activationFailed))
+       b. 通常のエラーバナー表示
+```
+
+**Design Decision #12**: フォールバック実行は暗黙のサイレント処理ではなく、必ずバナーで  
+「cd をコピーした」ことをユーザーに通知する。クリップボードの内容が変わる操作は  
+ユーザーに見える形でのみ行う。
+
+**設計対応（既存）**:
+- 通常の権限拒否時は「Settings を開く」ボタンで System Settings へ誘導
 - エラーは `AppState.recentErrors` に記録し、Dashboard でバナー表示
 
 ---
