@@ -3,7 +3,9 @@ import SwiftUI
 struct AgentDetailView: View {
     let project: Project
 
+    @Environment(AppState.self) private var appState
     @State private var viewModel: AgentDetailViewModel
+    @State private var terminalService = TerminalService()
 
     init(project: Project) {
         self.project = project
@@ -26,6 +28,35 @@ struct AgentDetailView: View {
         }
         .navigationTitle(project.name)
         .navigationSubtitle(viewModel.agent?.agentType.displayName ?? "")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    Task { await openInTerminal() }
+                } label: {
+                    Label("Open in Terminal", systemImage: "terminal")
+                }
+                .help("Open project directory in terminal")
+            }
+        }
+    }
+
+    private func openInTerminal() async {
+        do {
+            let banner = try await terminalService.open(
+                workingDirectory: project.rootURL,
+                providerType: appState.settings.preferredTerminal
+            )
+            if let banner {
+                appState.pendingBanners.append(banner)
+            }
+        } catch {
+            let banner = BannerMessage(
+                message: "Could not open terminal: \(error.localizedDescription)",
+                level: .error,
+                autoDismissAfter: 8
+            )
+            appState.pendingBanners.append(banner)
+        }
     }
 
     // MARK: - Header
@@ -185,6 +216,7 @@ struct AgentDetailView: View {
     NavigationStack {
         AgentDetailView(project: project)
     }
+    .environment(AppState())
     .frame(width: 480, height: 600)
 }
 
@@ -202,6 +234,7 @@ struct AgentDetailView: View {
     NavigationStack {
         AgentDetailView(project: project)
     }
+    .environment(AppState())
     .frame(width: 480, height: 600)
 }
 
@@ -210,6 +243,7 @@ struct AgentDetailView: View {
     NavigationStack {
         AgentDetailView(project: project)
     }
+    .environment(AppState())
     .frame(width: 480, height: 600)
 }
 

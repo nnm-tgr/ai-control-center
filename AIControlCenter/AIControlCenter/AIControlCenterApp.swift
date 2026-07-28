@@ -15,6 +15,7 @@ struct AIControlCenterApp: App {
         WindowGroup {
             DashboardView()
                 .environment(appState)
+                .task { await appState.start() }
         }
         .defaultSize(width: 1100, height: 680)
         .commands {
