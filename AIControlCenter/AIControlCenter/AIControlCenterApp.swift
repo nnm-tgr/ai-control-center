@@ -21,6 +21,11 @@ struct AIControlCenterApp: App {
             CommandGroup(replacing: .newItem) {}
         }
 
+        SwiftUI.Settings {
+            SettingsView()
+                .environment(appState)
+        }
+
         MenuBarExtra {
             MenuBarView()
                 .environment(appState)
