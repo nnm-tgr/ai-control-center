@@ -119,8 +119,8 @@ struct DashboardView: View {
         } description: {
             Text("Add a root directory in Settings to get started.")
         } actions: {
-            Button("Open Settings") {
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            SettingsLink {
+                Text("Open Settings")
             }
             .buttonStyle(.borderedProminent)
         }
@@ -178,9 +178,7 @@ struct DashboardView: View {
         }
 
         ToolbarItem(placement: .primaryAction) {
-            Button {
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-            } label: {
+            SettingsLink {
                 Image(systemName: "gear")
             }
             .help("Settings (⌘,)")
@@ -218,8 +216,9 @@ struct DashboardView: View {
     // MARK: - Data Sync
 
     private func syncProjects() {
-        if appState.projects.isEmpty && appState.settings.watchedRootURLs.isEmpty {
-            // 初回起動 / 未設定時は MockData でプレビュー
+        // watchedRoots が未設定の場合のみ MockData を表示
+        // ルートが設定済みなら（スキャン中で空でも）実データを使う
+        if appState.settings.watchedRootURLs.isEmpty {
             viewModel.loadMockData()
         } else {
             viewModel.projects = appState.projects

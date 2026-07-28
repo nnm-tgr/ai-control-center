@@ -171,10 +171,14 @@ final class AppState {
     // MARK: - Settings Sync
 
     func updateSettings(_ mutation: (inout Settings) -> Void) {
+        let oldRoots = settings.watchedRootURLs
         mutation(&settings)
-        // 監視ルートが変わった場合はウォッチャーを再起動
         watcher.stop()
         startWatcher()
+        // ルートが変わった場合は即座に再スキャン
+        if settings.watchedRootURLs != oldRoots {
+            Task { await refresh() }
+        }
     }
 
     // MARK: - Project Access

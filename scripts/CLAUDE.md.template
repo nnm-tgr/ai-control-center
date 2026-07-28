@@ -1,0 +1,55 @@
+# Agent Status Protocol
+
+このプロジェクトは [AI Control Center](https://github.com/daxe/ai-control-center) で監視されています。
+作業の開始・進行・完了時に `.ai/agent-status.json` を更新してください。
+
+## ステータス更新コマンド
+
+```bash
+# 作業開始・思考中
+ai-status thinking --task "タスクの説明" --phase <phase>
+
+# コマンド実行中
+ai-status running_command --task "実行中のコマンド" --phase <phase> --progress 0.5
+
+# ユーザーへの確認待ち
+ai-status waiting_user --task "確認内容や質問"
+
+# 完了
+ai-status completed --task "完了したタスク"
+
+# エラー
+ai-status error --error "エラーの詳細"
+```
+
+## Workflow Phases
+
+| phase | 説明 |
+|-------|------|
+| `spec` | 仕様確認・要件整理 |
+| `planning` | 実装計画の立案 |
+| `coding` | コーディング |
+| `review` | レビュー・確認 |
+| `testing` | テスト実行 |
+| `debugging` | デバッグ |
+| `deploying` | デプロイ・リリース |
+
+## 更新タイミング
+
+- **タスク開始時**: `ai-status thinking --task "..."` で何をするか宣言
+- **長時間コマンド前**: `ai-status running_command --task "..."` で実行内容を記録
+- **ユーザー確認が必要なとき**: `ai-status waiting_user --task "質問内容"`
+- **タスク完了時**: `ai-status completed --task "完了内容"`
+- **エラー発生時**: `ai-status error --error "詳細"`
+
+## セットアップ
+
+`ai-status` コマンドをインストールしていない場合:
+
+```bash
+# プロジェクトのスクリプトを直接実行
+bash /path/to/ai-control-center/scripts/ai-status <args>
+
+# またはシンボリックリンクを作成
+ln -s /path/to/ai-control-center/scripts/ai-status /usr/local/bin/ai-status
+```

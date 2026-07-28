@@ -1,0 +1,122 @@
+#!/usr/bin/env bash
+# ai-status — AI Control Center agent status updater
+#
+# Usage:
+#   ai-status <status> [options]
+#
+# Statuses:  idle | thinking | running_command | waiting_user | completed | error
+#
+# Options:
+#   --task    "description"   Current task description
+#   --phase   <phase>         Workflow phase (spec/planning/coding/review/testing/debugging/deploying)
+#   --progress 0.0-1.0        Completion progress
+#   --branch  <name>          Override git branch (auto-detected by default)
+#   --agent   <type>          Agent type (default: claude-code)
+#   --error   "message"       Error message (for error status)
+#
+# Examples:
+#   ai-status thinking --task "Designing the auth module"
+#   ai-status running_command --task "npm run build" --phase deploying --progress 0.8
+#   ai-status waiting_user --task "Please review the PR before merging"
+#   ai-status completed --task "Auth refactor done"
+#   ai-status error --error "Build failed: missing dependency"
+
+set -euo pipefail
+
+# ---- Parse arguments ----
+
+STATUS="${1:-idle}"
+AGENT="claude-code"
+TASK=""
+PHASE=""
+PROGRESS=""
+ERROR_MSG=""
+BRANCH=""
+
+shift || true
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --task)     TASK="$2";     shift 2 ;;
+        --phase)    PHASE="$2";    shift 2 ;;
+        --progress) PROGRESS="$2"; shift 2 ;;
+        --branch)   BRANCH="$2";   shift 2 ;;
+        --agent)    AGENT="$2";    shift 2 ;;
+        --error)    ERROR_MSG="$2"; shift 2 ;;
+        *) echo "Unknown option: $1" >&2; exit 1 ;;
+    esac
+done
+
+# ---- Validate status ----
+
+VALID_STATUSES="idle thinking running_command waiting_user completed error"
+if ! echo "$VALID_STATUSES" | grep -qw "$STATUS"; then
+    echo "Error: invalid status '$STATUS'. Valid: $VALID_STATUSES" >&2
+    exit 1
+fi
+
+# ---- Detect project root & branch ----
+
+PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+
+if [[ -z "$BRANCH" ]]; then
+    BRANCH=$(git -C "$PROJECT_ROOT" branch --show-current 2>/dev/null || echo "")
+fi
+
+# ---- Detect worktree ----
+
+WORKTREE=""
+GIT_COMMON=$(git -C "$PROJECT_ROOT" rev-parse --git-common-dir 2>/dev/null || echo "")
+GIT_DIR=$(git -C "$PROJECT_ROOT" rev-parse --git-dir 2>/dev/null || echo "")
+if [[ -n "$GIT_COMMON" && "$GIT_COMMON" != "$GIT_DIR" ]]; then
+    WORKTREE="$PROJECT_ROOT"
+fi
+
+# ---- Build JSON ----
+
+UPDATED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+json_string() {
+    # Escape double quotes and backslashes
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+JSON='{'
+JSON+=$'\n'"  \"schema_version\": \"1.0\","
+JSON+=$'\n'"  \"agent\": \"$(json_string "$AGENT")\","
+JSON+=$'\n'"  \"status\": \"$(json_string "$STATUS")\","
+
+if [[ -n "$TASK" ]]; then
+    JSON+=$'\n'"  \"task\": \"$(json_string "$TASK")\","
+fi
+if [[ -n "$PHASE" ]]; then
+    JSON+=$'\n'"  \"workflow_phase\": \"$(json_string "$PHASE")\","
+fi
+if [[ -n "$PROGRESS" ]]; then
+    JSON+=$'\n'"  \"progress\": $PROGRESS,"
+fi
+if [[ -n "$BRANCH" ]]; then
+    JSON+=$'\n'"  \"branch\": \"$(json_string "$BRANCH")\","
+fi
+if [[ -n "$WORKTREE" ]]; then
+    JSON+=$'\n'"  \"worktree\": \"$(json_string "$WORKTREE")\","
+fi
+if [[ -n "$ERROR_MSG" ]]; then
+    JSON+=$'\n'"  \"error_message\": \"$(json_string "$ERROR_MSG")\","
+fi
+
+JSON+=$'\n'"  \"updated_at\": \"$UPDATED_AT\""
+JSON+=$'\n''}'
+
+# ---- Write atomically ----
+
+AI_DIR="$PROJECT_ROOT/.ai"
+mkdir -p "$AI_DIR"
+
+TMPFILE="$AI_DIR/agent-status.tmp"
+OUTFILE="$AI_DIR/agent-status.json"
+
+printf '%s\n' "$JSON" > "$TMPFILE"
+mv "$TMPFILE" "$OUTFILE"
+
+echo "✓ $STATUS${TASK:+ — $TASK} ($PROJECT_ROOT)"
