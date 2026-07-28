@@ -43,6 +43,7 @@ final class AppState {
     // MARK: - Lifecycle
 
     func start() async {
+        await NotificationService.shared.requestAuthorization()
         await refresh()
         startWatcher()
     }
@@ -134,13 +135,15 @@ final class AppState {
         in project: Project,
         agent: Agent
     ) {
+        guard NotificationRule.shouldNotify(from: oldStatus, to: newStatus) else { return }
+
         let transition = StatusTransition(
             from: oldStatus,
             to: newStatus,
             projectName: project.name,
             taskName: agent.currentTask
         )
-        let level: NotificationLevel = newStatus == .error || newStatus == .waitingUser ? .high : .normal
+        let level = NotificationRule.level(for: newStatus)
         let notification = AppNotification(
             projectID: project.id,
             agentID: agent.id,
@@ -150,6 +153,11 @@ final class AppState {
             triggeredBy: transition
         )
         notifications.append(notification)
+
+        Task {
+            await NotificationService.shared.post(notification, settings: settings)
+            await NotificationService.shared.updateBadge(unreadCount: unreadCount)
+        }
     }
 
     func markAllRead() {
