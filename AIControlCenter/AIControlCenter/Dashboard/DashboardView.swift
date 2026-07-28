@@ -14,7 +14,12 @@ struct DashboardView: View {
         }
         .navigationTitle("AI Control Center")
         .toolbar { toolbarItems }
-        .onAppear { viewModel.loadMockData() }
+        .onAppear {
+            syncProjects()
+        }
+        .onChange(of: appState.projects) { _, newProjects in
+            viewModel.projects = newProjects
+        }
     }
 
     // MARK: - List
@@ -159,12 +164,17 @@ struct DashboardView: View {
 
         ToolbarItem(placement: .primaryAction) {
             Button {
-                viewModel.loadMockData()
+                Task { await appState.refresh() }
             } label: {
-                Image(systemName: "arrow.clockwise")
+                if appState.isScanning {
+                    ProgressView().scaleEffect(0.7)
+                } else {
+                    Image(systemName: "arrow.clockwise")
+                }
             }
             .help("Refresh (⌘R)")
             .keyboardShortcut("r", modifiers: .command)
+            .disabled(appState.isScanning)
         }
 
         ToolbarItem(placement: .primaryAction) {
@@ -203,6 +213,17 @@ struct DashboardView: View {
             Label("Sort", systemImage: "arrow.up.arrow.down")
         }
         .help("Sort order")
+    }
+
+    // MARK: - Data Sync
+
+    private func syncProjects() {
+        if appState.projects.isEmpty && appState.settings.watchedRootURLs.isEmpty {
+            // 初回起動 / 未設定時は MockData でプレビュー
+            viewModel.loadMockData()
+        } else {
+            viewModel.projects = appState.projects
+        }
     }
 
     // MARK: - Context Menu
