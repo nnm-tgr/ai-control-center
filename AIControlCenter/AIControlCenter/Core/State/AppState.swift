@@ -83,7 +83,9 @@ final class AppState {
             guard let idx = projects.firstIndex(where: { $0.id == projectID }) else { continue }
             var project = projects[idx]
 
-            if let agentIdx = project.agents.firstIndex(where: { $0.id == newAgent.id }) {
+            // agentType で既存エージェントを照合する
+            // ID は Scanner と Watcher で異なるため ID 照合は不可
+            if let agentIdx = project.agents.firstIndex(where: { $0.agentType == newAgent.agentType }) {
                 let oldAgent = project.agents[agentIdx]
                 project.agents[agentIdx] = newAgent
                 if oldAgent.status != newAgent.status {
