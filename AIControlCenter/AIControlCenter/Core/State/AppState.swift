@@ -27,10 +27,15 @@ final class AppState {
 
     private(set) var lastError: AppError?
 
+    // MARK: - Approval
+
+    var pendingApprovals: [ToolApprovalRequest] { toolApproval.pendingApprovals }
+
     // MARK: - Services
 
     private let scanner = ProjectScannerService()
     private let watcher = FileWatcherService()
+    private let toolApproval = ToolApprovalService()
     private let settingsStore: SettingsStore
 
     // MARK: - Init
@@ -43,14 +48,38 @@ final class AppState {
     // MARK: - Lifecycle
 
     func start() async {
+        // 保存済みブックマークを有効化してからスキャン・監視を開始する
+        settingsStore.activateAllBookmarks()
         await NotificationService.shared.requestAuthorization()
         await refresh()
         startWatcher()
+        toolApproval.start(roots: settings.watchedRootURLs,
+                           excludedNames: settings.excludedDirectoryNamesSet)
+    }
+
+    func addWatchedRoot(_ url: URL) {
+        // NSOpenPanel URLs already have sandbox access for this session;
+        // create bookmark in background so next launch can restore access.
+        Task.detached(priority: .utility) { [settingsStore] in
+            settingsStore.createBookmark(for: url)
+        }
+        updateSettings { s in
+            if !s.watchedRootURLs.contains(url) { s.watchedRootURLs.append(url) }
+        }
+    }
+
+    func removeWatchedRoot(_ url: URL) {
+        settingsStore.removeBookmark(for: url)
+        updateSettings { $0.watchedRootURLs.removeAll { $0 == url } }
     }
 
     func stop() {
         watcher.stop()
+        toolApproval.stop()
     }
+
+    func approve(_ request: ToolApprovalRequest) { toolApproval.approve(request) }
+    func deny(_ request: ToolApprovalRequest) { toolApproval.deny(request) }
 
     // MARK: - Scan
 
@@ -174,12 +203,39 @@ final class AppState {
 
     func updateSettings(_ mutation: (inout Settings) -> Void) {
         let oldRoots = settings.watchedRootURLs
+        let oldApprovalEnabled = settings.approvalEnabled
+        let oldApprovalTimeout = settings.approvalTimeoutSeconds
         mutation(&settings)
         watcher.stop()
         startWatcher()
-        // ルートが変わった場合は即座に再スキャン
+        toolApproval.stop()
+        toolApproval.start(roots: settings.watchedRootURLs,
+                           excludedNames: settings.excludedDirectoryNamesSet)
         if settings.watchedRootURLs != oldRoots {
             Task { await refresh() }
+        }
+        if settings.approvalEnabled != oldApprovalEnabled ||
+           settings.approvalTimeoutSeconds != oldApprovalTimeout {
+            writeApprovalSettingsToRoots()
+        }
+    }
+
+    private func writeApprovalSettingsToRoots() {
+        let enabled = settings.approvalEnabled
+        let timeout = settings.approvalTimeoutSeconds
+        let json = """
+        {
+          "approval": {
+            "enabled": \(enabled ? "true" : "false"),
+            "timeout_seconds": \(timeout)
+          }
+        }
+        """
+        guard let data = json.data(using: .utf8) else { return }
+        for root in settings.watchedRootURLs {
+            let aiDir = root.appendingPathComponent(".ai")
+            try? FileManager.default.createDirectory(at: aiDir, withIntermediateDirectories: true)
+            try? data.write(to: aiDir.appendingPathComponent("settings.json"), options: .atomic)
         }
     }
 

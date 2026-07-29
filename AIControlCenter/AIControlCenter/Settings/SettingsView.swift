@@ -59,6 +59,18 @@ private struct GeneralSettingsView: View {
                     step: 50
                 )
             }
+
+            Section("Tool Approval") {
+                Toggle("Require approval before tool execution", isOn: $appState.settings.approvalEnabled)
+                if appState.settings.approvalEnabled {
+                    Stepper(
+                        "Timeout: \(appState.settings.approvalTimeoutSeconds)s (auto-allow)",
+                        value: $appState.settings.approvalTimeoutSeconds,
+                        in: 10...120,
+                        step: 5
+                    )
+                }
+            }
         }
         .formStyle(.grouped)
         .padding()
@@ -84,7 +96,8 @@ private struct DirectoriesSettingsView: View {
                         .tag(url)
                 }
                 .onDelete { offsets in
-                    appState.updateSettings { $0.watchedRootURLs.remove(atOffsets: offsets) }
+                    let urls = offsets.map { appState.settings.watchedRootURLs[$0] }
+                    urls.forEach { appState.removeWatchedRoot($0) }
                 }
             }
             .frame(minHeight: 160)
@@ -149,18 +162,17 @@ private struct DirectoriesSettingsView: View {
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.prompt = "Select Root Directory"
-        if panel.runModal() == .OK, let url = panel.url {
-            appState.updateSettings { settings in
-                if !settings.watchedRootURLs.contains(url) {
-                    settings.watchedRootURLs.append(url)
-                }
+        panel.begin { [appState] response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { @MainActor in
+                appState.addWatchedRoot(url)
             }
         }
     }
 
     private func removeSelected() {
         guard let url = selectedURL else { return }
-        appState.updateSettings { $0.watchedRootURLs.removeAll { $0 == url } }
+        appState.removeWatchedRoot(url)
         selectedURL = nil
     }
 }

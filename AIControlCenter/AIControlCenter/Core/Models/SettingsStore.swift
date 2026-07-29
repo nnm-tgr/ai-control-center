@@ -7,6 +7,7 @@ final class SettingsStore: @unchecked Sendable {
 
     private enum Keys {
         static let watchedRootPaths = "watchedRootPaths"
+        static let securityBookmarks = "securityBookmarks"
         static let scanDepth = "scanDepth"
         static let excludedDirectoryNames = "excludedDirectoryNames"
         static let preferredTerminal = "preferredTerminal"
@@ -18,6 +19,8 @@ final class SettingsStore: @unchecked Sendable {
         static let showMenuBarIcon = "showMenuBarIcon"
         static let activityRetentionCount = "activityRetentionCount"
         static let launchAtLogin = "launchAtLogin"
+        static let approvalEnabled = "approvalEnabled"
+        static let approvalTimeoutSeconds = "approvalTimeoutSeconds"
     }
 
     init() {
@@ -27,6 +30,50 @@ final class SettingsStore: @unchecked Sendable {
     func update(_ mutation: (inout Settings) -> Void) {
         mutation(&settings)
         save(settings)
+    }
+
+    // MARK: - Security-Scoped Bookmarks
+
+    /// NSOpenPanel で選択された URL の security-scoped bookmark を永続化する
+    func createBookmark(for url: URL) {
+        guard let data = try? url.bookmarkData(
+            options: .withSecurityScope,
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        ) else { return }
+        var bookmarks = storedBookmarks()
+        bookmarks[url.path] = data
+        UserDefaults.standard.set(bookmarks, forKey: Keys.securityBookmarks)
+    }
+
+    func removeBookmark(for url: URL) {
+        var bookmarks = storedBookmarks()
+        bookmarks.removeValue(forKey: url.path)
+        UserDefaults.standard.set(bookmarks, forKey: Keys.securityBookmarks)
+    }
+
+    /// アプリ起動時に呼び出し、保存済みブックマークをすべてアクティブ化する
+    /// アクセス可能になった URL の配列を返す
+    @discardableResult
+    func activateAllBookmarks() -> [URL] {
+        var accessible: [URL] = []
+        for (_, data) in storedBookmarks() {
+            var stale = false
+            guard let url = try? URL(
+                resolvingBookmarkData: data,
+                options: .withSecurityScope,
+                relativeTo: nil,
+                bookmarkDataIsStale: &stale
+            ) else { continue }
+            guard url.startAccessingSecurityScopedResource() else { continue }
+            accessible.append(url)
+            if stale { createBookmark(for: url) }
+        }
+        return accessible
+    }
+
+    private func storedBookmarks() -> [String: Data] {
+        UserDefaults.standard.dictionary(forKey: Keys.securityBookmarks) as? [String: Data] ?? [:]
     }
 
     private static func load() -> Settings {
@@ -53,7 +100,9 @@ final class SettingsStore: @unchecked Sendable {
             gitPollInterval: defaults.double(forKey: Keys.gitPollInterval).nonZero(default: 30),
             showMenuBarIcon: defaults.bool(forKey: Keys.showMenuBarIcon, default: true),
             activityRetentionCount: defaults.integer(forKey: Keys.activityRetentionCount).nonZero(default: 200),
-            launchAtLogin: defaults.bool(forKey: Keys.launchAtLogin, default: false)
+            launchAtLogin: defaults.bool(forKey: Keys.launchAtLogin, default: false),
+            approvalEnabled: defaults.bool(forKey: Keys.approvalEnabled, default: false),
+            approvalTimeoutSeconds: defaults.integer(forKey: Keys.approvalTimeoutSeconds).nonZero(default: 30)
         )
     }
 
@@ -71,6 +120,8 @@ final class SettingsStore: @unchecked Sendable {
         defaults.set(settings.showMenuBarIcon, forKey: Keys.showMenuBarIcon)
         defaults.set(settings.activityRetentionCount, forKey: Keys.activityRetentionCount)
         defaults.set(settings.launchAtLogin, forKey: Keys.launchAtLogin)
+        defaults.set(settings.approvalEnabled, forKey: Keys.approvalEnabled)
+        defaults.set(settings.approvalTimeoutSeconds, forKey: Keys.approvalTimeoutSeconds)
     }
 }
 

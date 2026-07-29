@@ -13,6 +13,8 @@ struct Settings: Sendable {
     var showMenuBarIcon: Bool
     var activityRetentionCount: Int
     var launchAtLogin: Bool
+    var approvalEnabled: Bool
+    var approvalTimeoutSeconds: Int
 
     init(
         watchedRootURLs: [URL] = [],
@@ -26,7 +28,9 @@ struct Settings: Sendable {
         gitPollInterval: TimeInterval = 30,
         showMenuBarIcon: Bool = true,
         activityRetentionCount: Int = 200,
-        launchAtLogin: Bool = false
+        launchAtLogin: Bool = false,
+        approvalEnabled: Bool = false,
+        approvalTimeoutSeconds: Int = 30
     ) {
         self.watchedRootURLs = watchedRootURLs
         self.scanDepth = scanDepth
@@ -40,6 +44,8 @@ struct Settings: Sendable {
         self.showMenuBarIcon = showMenuBarIcon
         self.activityRetentionCount = activityRetentionCount
         self.launchAtLogin = launchAtLogin
+        self.approvalEnabled = approvalEnabled
+        self.approvalTimeoutSeconds = approvalTimeoutSeconds
     }
 
     static let defaultExcludedNames: [String] = [

@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# ai-approve — PreToolUse hook: write pending.json, wait for app approval
+set -eo pipefail
+
+PROJECT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+AI_DIR="$PROJECT_ROOT/.ai"
+SETTINGS_FILE="$AI_DIR/settings.json"
+
+# approval が有効かどうか確認（settings.json がなければスキップ）
+ENABLED=$(python3 -c "
+import json, sys
+try:
+    with open('$SETTINGS_FILE') as f:
+        d = json.load(f)
+    print('true' if d.get('approval', {}).get('enabled', False) else 'false')
+except:
+    print('false')
+" 2>/dev/null || echo "false")
+
+[ "$ENABLED" != "true" ] && exit 0
+
+TIMEOUT=$(python3 -c "
+import json
+try:
+    with open('$SETTINGS_FILE') as f:
+        d = json.load(f)
+    print(d.get('approval', {}).get('timeout_seconds', 30))
+except:
+    print(30)
+" 2>/dev/null || echo "30")
+
+PENDING="$AI_DIR/pending.json"
+APPROVAL="$AI_DIR/approval.json"
+SESSION="${CLAUDE_SESSION_ID:-$(uuidgen 2>/dev/null || date +%s)}"
+TOOL="${1:-unknown}"
+
+# ツール入力から表示用プレビューを抽出
+INPUT_PREVIEW=$(python3 -c "
+import sys, json, os
+raw = os.environ.get('CLAUDE_TOOL_INPUT', '{}')
+try:
+    d = json.loads(raw)
+    if 'command' in d:
+        val = str(d['command'])[:120]
+    elif 'file_path' in d:
+        val = str(d.get('file_path', ''))[:120]
+    elif 'path' in d:
+        val = str(d.get('path', ''))[:120]
+    else:
+        val = str(list(d.values())[0])[:120] if d else ''
+    key = 'command' if 'command' in d else ('file_path' if 'file_path' in d else 'input')
+    import json as j
+    print(j.dumps({key: val}))
+except:
+    print('{}')
+" 2>/dev/null || echo "{}")
+
+mkdir -p "$AI_DIR"
+rm -f "$APPROVAL"
+
+NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+python3 -c "
+import json
+data = {
+    'schema_version': '1.0',
+    'session_id': '$SESSION',
+    'tool': '$TOOL',
+    'input': $INPUT_PREVIEW,
+    'requested_at': '$NOW',
+    'timeout_seconds': $TIMEOUT
+}
+with open('$PENDING', 'w') as f:
+    json.dump(data, f, indent=2)
+" 2>/dev/null || exit 0
+
+# approval.json が来るまでポーリング
+i=0
+while [ "$i" -lt "$TIMEOUT" ]; do
+    if [ -f "$APPROVAL" ]; then
+        DECISION=$(python3 -c "
+import json
+try:
+    with open('$APPROVAL') as f:
+        print(json.load(f).get('decision', 'allow'))
+except:
+    print('allow')
+" 2>/dev/null || echo "allow")
+        rm -f "$APPROVAL" "$PENDING"
+        [ "$DECISION" = "allow" ] && exit 0 || exit 2
+    fi
+    sleep 1
+    i=$((i + 1))
+done
+
+# タイムアウト = 自動許可
+rm -f "$PENDING"
+exit 0

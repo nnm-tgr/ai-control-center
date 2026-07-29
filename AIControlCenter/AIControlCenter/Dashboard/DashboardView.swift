@@ -6,19 +6,23 @@ struct DashboardView: View {
     @FocusState private var isSearchFocused: Bool
 
     var body: some View {
-        NavigationSplitView {
-            listContent
-                .navigationSplitViewColumnWidth(min: 600, ideal: 780)
-        } detail: {
-            detailContent
-        }
-        .navigationTitle("AI Control Center")
-        .toolbar { toolbarItems }
-        .onAppear {
-            syncProjects()
-        }
-        .onChange(of: appState.projects) { _, newProjects in
-            viewModel.projects = newProjects
+        ZStack(alignment: .bottom) {
+            NavigationSplitView {
+                listContent
+                    .navigationSplitViewColumnWidth(min: 600, ideal: 780)
+            } detail: {
+                detailContent
+            }
+            .navigationTitle("AI Control Center")
+            .toolbar { toolbarItems }
+            .onAppear {
+                syncProjects()
+            }
+            .onChange(of: appState.projects) { _, newProjects in
+                viewModel.projects = newProjects
+            }
+
+            ApprovalOverlayView()
         }
     }
 
