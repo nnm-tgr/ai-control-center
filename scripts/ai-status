@@ -119,4 +119,5 @@ OUTFILE="$AI_DIR/agent-status.json"
 printf '%s\n' "$JSON" > "$TMPFILE"
 mv "$TMPFILE" "$OUTFILE"
 
-echo "✓ $STATUS${TASK:+ — $TASK} ($PROJECT_ROOT)"
+# stdout が TTY のときのみ表示（hook 経由では無出力 → JSON parse エラー防止）
+[ -t 1 ] && echo "✓ $STATUS${TASK:+ — $TASK} ($PROJECT_ROOT)" || true

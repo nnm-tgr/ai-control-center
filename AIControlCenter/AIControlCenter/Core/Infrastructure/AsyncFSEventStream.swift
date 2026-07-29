@@ -16,12 +16,14 @@ final class AsyncFSEventStream: Sendable {
     init(
         paths: [String],
         excludedPathSegments: Set<String> = Set(Settings.defaultExcludedNames),
-        latency: CFTimeInterval = 0.5
+        latency: CFTimeInterval = 0.5,
+        targetFileNames: Set<String> = ["agent-status.json"]
     ) {
         self.wrapper = FSEventStreamWrapper(
             paths: paths,
             excludedPathSegments: excludedPathSegments,
-            latency: latency
+            latency: latency,
+            targetFileNames: targetFileNames
         )
     }
 

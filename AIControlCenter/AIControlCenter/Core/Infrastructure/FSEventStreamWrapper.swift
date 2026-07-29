@@ -30,14 +30,18 @@ final class FSEventStreamWrapper: @unchecked Sendable {
     ///   - paths: 監視するルートディレクトリのパス群
     ///   - excludedPathSegments: このセグメントを含むパスを Stage 1 で除外（例: "node_modules"）
     ///   - latency: イベントバッチの遅延秒数（デフォルト 0.5s）
+    private let targetFileNames: Set<String>
+
     init(
         paths: [String],
         excludedPathSegments: Set<String> = Set(Settings.defaultExcludedNames),
-        latency: CFTimeInterval = 0.5
+        latency: CFTimeInterval = 0.5,
+        targetFileNames: Set<String> = ["agent-status.json"]
     ) {
         self.watchedPaths = paths
         self.excludedPathSegments = excludedPathSegments
         self.latency = latency
+        self.targetFileNames = targetFileNames
     }
 
     deinit {
@@ -109,9 +113,9 @@ final class FSEventStreamWrapper: @unchecked Sendable {
         return segments.contains { excludedPathSegments.contains(String($0)) }
     }
 
-    /// Stage 2: パスの最終コンポーネントが "agent-status.json" に完全一致するか判定
+    /// Stage 2: パスの最終コンポーネントが監視対象ファイル名セットに含まれるか判定
     func isTargetFile(path: String) -> Bool {
-        (path as NSString).lastPathComponent == "agent-status.json"
+        targetFileNames.contains((path as NSString).lastPathComponent)
     }
 
     fileprivate func handleEvents(paths: [String], flags: [FSEventStreamEventFlags], ids: [FSEventStreamEventId]) {
