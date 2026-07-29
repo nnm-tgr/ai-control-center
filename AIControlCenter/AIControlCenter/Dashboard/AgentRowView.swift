@@ -3,6 +3,7 @@ import SwiftUI
 struct AgentRowView: View {
     let project: Project
     let isSelected: Bool
+    var indent: CGFloat = 0
 
     @State private var isHovered = false
 
@@ -10,6 +11,9 @@ struct AgentRowView: View {
 
     var body: some View {
         HStack(spacing: 0) {
+            if indent > 0 {
+                Color.clear.frame(width: indent)
+            }
             // Status dot
             Circle()
                 .fill(project.aggregatedStatus.color)

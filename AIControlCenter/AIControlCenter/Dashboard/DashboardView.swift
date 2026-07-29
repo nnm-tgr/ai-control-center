@@ -15,15 +15,9 @@ struct DashboardView: View {
             }
             .navigationTitle("AI Control Center")
             .toolbar { toolbarItems }
-            .onAppear {
-                syncProjects()
-            }
-            .onChange(of: appState.projects) { _, newProjects in
-                viewModel.projects = newProjects
-            }
-            .onChange(of: appState.settings.watchedRootURLs) { _, _ in
-                syncProjects()
-            }
+            .onAppear { syncProjects() }
+            .onChange(of: appState.projects) { _, _ in syncProjects() }
+            .onChange(of: appState.settings.watchedRootURLs) { _, _ in syncProjects() }
 
             ApprovalOverlayView()
         }
@@ -39,7 +33,7 @@ struct DashboardView: View {
             columnHeader
             Divider()
 
-            if viewModel.displayedProjects.isEmpty {
+            if viewModel.flatRows.isEmpty {
                 emptyState
             } else {
                 projectList
@@ -74,20 +68,13 @@ struct DashboardView: View {
 
     private var columnHeader: some View {
         HStack(spacing: 0) {
-            Text("")
-                .frame(width: 18)   // status dot
-            Text("PROJECT")
-                .frame(width: 160, alignment: .leading)
-            Text("AGENT")
-                .frame(width: 110, alignment: .leading)
-            Text("STATUS")
-                .frame(width: 90, alignment: .leading)
-            Text("ELAPSED")
-                .frame(width: 70, alignment: .leading)
-            Text("BRANCH")
-                .frame(width: 110, alignment: .leading)
-            Text("CURRENT TASK")
-                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("").frame(width: 18)
+            Text("PROJECT").frame(width: 160, alignment: .leading)
+            Text("AGENT").frame(width: 110, alignment: .leading)
+            Text("STATUS").frame(width: 90, alignment: .leading)
+            Text("ELAPSED").frame(width: 70, alignment: .leading)
+            Text("BRANCH").frame(width: 110, alignment: .leading)
+            Text("CURRENT TASK").frame(maxWidth: .infinity, alignment: .leading)
         }
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -96,17 +83,102 @@ struct DashboardView: View {
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
+    // MARK: - Project List (Drag & Drop)
+
     private var projectList: some View {
-        List(viewModel.displayedProjects, selection: $viewModel.selectedProjectID) { project in
-            AgentRowView(project: project, isSelected: viewModel.selectedProjectID == project.id)
-                .listRowInsets(EdgeInsets())
-                .listRowSeparator(.visible)
-                .tag(project.id)
-                .onTapGesture { viewModel.selectProject(project) }
-                .contextMenu { contextMenu(for: project) }
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                // Drop zone before first item
+                DropInsertZone { id in viewModel.moveEntryToFront(id: id) }
+
+                ForEach(viewModel.flatRows) { row in
+                    rowView(for: row)
+                    Divider()
+                    // Insert zone appears only at top-level boundaries
+                    if let afterID = insertZoneAfterID(for: row) {
+                        DropInsertZone { id in viewModel.moveEntry(id: id, after: afterID) }
+                    }
+                }
+            }
         }
-        .listStyle(.plain)
         .scrollContentBackground(.hidden)
+    }
+
+    // MARK: - Row View (1 FlatRow = 1 View)
+
+    @ViewBuilder
+    private func rowView(for row: DashboardViewModel.FlatRow) -> some View {
+        switch row {
+        case .solo(let project):
+            soloRow(project)
+
+        case .groupHeader(let id, let name, let projects, let isExpanded):
+            ProjectGroupRowView(
+                id: id,
+                name: name,
+                projects: projects,
+                isExpanded: isExpanded,
+                onToggle: { viewModel.toggleGroupExpanded(id: id) },
+                onRename: { viewModel.renameGroup(id: id, name: $0) },
+                onDissolve: { viewModel.dissolveGroup(id: id) }
+            )
+            .draggable(id.uuidString) {
+                groupDragPreview(name: name, count: projects.count)
+            }
+            .modifier(GroupDropTarget(itemID: id) { draggedID in
+                viewModel.groupWith(draggingID: draggedID, targetID: id)
+            })
+
+        case .grouped(let project, let groupID, _):
+            soloRow(project, indent: 20, groupID: groupID)
+        }
+    }
+
+    // Insert zone appears after .solo, after collapsed .groupHeader, and after the last child of a group
+    private func insertZoneAfterID(for row: DashboardViewModel.FlatRow) -> UUID? {
+        switch row {
+        case .solo(let p):
+            return p.id
+        case .groupHeader(let id, _, _, let isExpanded):
+            return isExpanded ? nil : id
+        case .grouped(_, let gid, let isLast):
+            return isLast ? gid : nil
+        }
+    }
+
+    // MARK: - Solo Row
+
+    private func soloRow(_ project: Project, indent: CGFloat = 0, groupID: UUID? = nil) -> some View {
+        AgentRowView(project: project, isSelected: viewModel.selectedProjectID == project.id, indent: indent)
+            .draggable(project.id.uuidString) {
+                dragPreview(name: project.name, status: project.aggregatedStatus)
+            }
+            .modifier(GroupDropTarget(itemID: project.id) { draggedID in
+                viewModel.groupWith(draggingID: draggedID, targetID: project.id)
+            })
+            .onTapGesture { viewModel.selectProject(project) }
+            .contextMenu { soloContextMenu(project: project, groupID: groupID) }
+    }
+
+    private func groupDragPreview(name: String, count: Int) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "folder").foregroundStyle(.secondary).font(.callout)
+            Text(name).font(.body)
+            Text("(\(count))").foregroundStyle(.secondary).font(.callout)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    private func dragPreview(name: String, status: AgentStatus) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(status.color).frame(width: 8, height: 8)
+            Text(name).font(.body)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
     }
 
     // MARK: - Empty States
@@ -126,10 +198,8 @@ struct DashboardView: View {
         } description: {
             Text("Add a root directory in Settings to get started.")
         } actions: {
-            SettingsLink {
-                Text("Open Settings")
-            }
-            .buttonStyle(.borderedProminent)
+            SettingsLink { Text("Open Settings") }
+                .buttonStyle(.borderedProminent)
         }
     }
 
@@ -157,18 +227,10 @@ struct DashboardView: View {
     @ToolbarContentBuilder
     private var toolbarItems: some ToolbarContent {
         ToolbarItem(placement: .navigation) {
-            Text("AI Control Center")
-                .font(.headline)
+            Text("AI Control Center").font(.headline)
         }
-
-        ToolbarItem(placement: .primaryAction) {
-            filterMenu
-        }
-
-        ToolbarItem(placement: .primaryAction) {
-            sortMenu
-        }
-
+        ToolbarItem(placement: .primaryAction) { filterMenu }
+        ToolbarItem(placement: .primaryAction) { sortMenu }
         ToolbarItem(placement: .primaryAction) {
             Button {
                 Task { await appState.refresh() }
@@ -183,21 +245,16 @@ struct DashboardView: View {
             .keyboardShortcut("r", modifiers: .command)
             .disabled(appState.isScanning)
         }
-
         ToolbarItem(placement: .primaryAction) {
-            SettingsLink {
-                Image(systemName: "gear")
-            }
-            .help("Settings (⌘,)")
+            SettingsLink { Image(systemName: "gear") }
+                .help("Settings (⌘,)")
         }
     }
 
     private var filterMenu: some View {
         Menu {
             Picker("Filter", selection: $viewModel.filterGroup) {
-                ForEach(StatusGroup.allCases, id: \.self) { group in
-                    Text(group.rawValue).tag(group)
-                }
+                ForEach(StatusGroup.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.inline)
         } label: {
@@ -209,9 +266,7 @@ struct DashboardView: View {
     private var sortMenu: some View {
         Menu {
             Picker("Sort", selection: $viewModel.sortOrder) {
-                ForEach(DashboardViewModel.SortOrder.allCases, id: \.self) { order in
-                    Text(order.rawValue).tag(order)
-                }
+                ForEach(DashboardViewModel.SortOrder.allCases, id: \.self) { Text($0.rawValue).tag($0) }
             }
             .pickerStyle(.inline)
         } label: {
@@ -220,30 +275,79 @@ struct DashboardView: View {
         .help("Sort order")
     }
 
-    // MARK: - Data Sync
-
-    private func syncProjects() {
-        viewModel.projects = appState.projects
-    }
-
-    // MARK: - Context Menu
+    // MARK: - Context Menus
 
     @ViewBuilder
-    private func contextMenu(for project: Project) -> some View {
+    private func soloContextMenu(project: Project, groupID: UUID?) -> some View {
         Button("Show Detail") { viewModel.selectProject(project) }
         Divider()
+        if let gid = groupID {
+            Button("Remove from Group") { viewModel.ungroupProject(project.id, fromGroupID: gid) }
+            Divider()
+        }
         Button("Copy Project Path") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(project.rootURL.path, forType: .string)
         }
-        Button("Open in Finder") {
-            NSWorkspace.shared.open(project.rootURL)
-        }
+        Button("Open in Finder") { NSWorkspace.shared.open(project.rootURL) }
         Button("Open .ai/ Folder") {
             NSWorkspace.shared.open(project.rootURL.appending(component: ".ai"))
         }
     }
+
+    // MARK: - Data Sync
+
+    private func syncProjects() {
+        viewModel.projects = appState.projects
+        viewModel.syncLayout()
+    }
 }
+
+// MARK: - Drop Insert Zone
+
+private struct DropInsertZone: View {
+    let onInsert: (UUID) -> Void
+    @State private var isTargeted = false
+
+    var body: some View {
+        Rectangle()
+            .fill(isTargeted ? Color.accentColor : Color.clear)
+            .frame(height: isTargeted ? 3 : 2)
+            .animation(.easeInOut(duration: 0.1), value: isTargeted)
+            .dropDestination(for: String.self) { strings, _ in
+                guard let id = strings.first.flatMap({ UUID(uuidString: $0) }) else { return false }
+                onInsert(id)
+                return true
+            } isTargeted: { isTargeted = $0 }
+    }
+}
+
+// MARK: - Group Drop Target Modifier
+
+private struct GroupDropTarget: ViewModifier {
+    let itemID: UUID
+    let onGroup: (UUID) -> Void
+    @State private var isTargeted = false
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                if isTargeted {
+                    RoundedRectangle(cornerRadius: 3)
+                        .stroke(Color.accentColor, lineWidth: 2)
+                        .padding(1)
+                }
+            }
+            .dropDestination(for: String.self) { strings, _ in
+                guard let id = strings.first.flatMap({ UUID(uuidString: $0) }),
+                      id != itemID else { return false }
+                onGroup(id)
+                return true
+            } isTargeted: { isTargeted = $0 }
+    }
+}
+
+// MARK: - Previews
 
 #Preview("Dashboard — Mock Data") {
     DashboardView()
