@@ -58,11 +58,11 @@ final class AppState {
     }
 
     func addWatchedRoot(_ url: URL) {
-        // NSOpenPanel URLs already have sandbox access for this session;
-        // create bookmark in background so next launch can restore access.
-        Task.detached(priority: .utility) { [settingsStore] in
-            settingsStore.createBookmark(for: url)
-        }
+        // Activate access for current session (required for .fileImporter URLs in sandboxed app).
+        _ = url.startAccessingSecurityScopedResource()
+        // Keep on MainActor — SettingsStore is MainActor-isolated
+        // (SWIFT_DEFAULT_ACTOR_ISOLATION=MainActor); Task.detached would EXC_BREAKPOINT.
+        settingsStore.createBookmark(for: url)
         updateSettings { s in
             if !s.watchedRootURLs.contains(url) { s.watchedRootURLs.append(url) }
         }
@@ -70,6 +70,7 @@ final class AppState {
 
     func removeWatchedRoot(_ url: URL) {
         settingsStore.removeBookmark(for: url)
+        url.stopAccessingSecurityScopedResource()
         updateSettings { $0.watchedRootURLs.removeAll { $0 == url } }
     }
 

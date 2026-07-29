@@ -21,6 +21,9 @@ struct DashboardView: View {
             .onChange(of: appState.projects) { _, newProjects in
                 viewModel.projects = newProjects
             }
+            .onChange(of: appState.settings.watchedRootURLs) { _, _ in
+                syncProjects()
+            }
 
             ApprovalOverlayView()
         }
@@ -220,13 +223,7 @@ struct DashboardView: View {
     // MARK: - Data Sync
 
     private func syncProjects() {
-        // watchedRoots が未設定の場合のみ MockData を表示
-        // ルートが設定済みなら（スキャン中で空でも）実データを使う
-        if appState.settings.watchedRootURLs.isEmpty {
-            viewModel.loadMockData()
-        } else {
-            viewModel.projects = appState.projects
-        }
+        viewModel.projects = appState.projects
     }
 
     // MARK: - Context Menu

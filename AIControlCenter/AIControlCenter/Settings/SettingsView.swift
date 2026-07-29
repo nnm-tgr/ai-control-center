@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @Environment(AppState.self) private var appState
@@ -82,6 +83,7 @@ private struct GeneralSettingsView: View {
 private struct DirectoriesSettingsView: View {
     @Environment(AppState.self) private var appState
     @State private var selectedURL: URL?
+    @State private var isImporting = false
 
     var body: some View {
         @Bindable var appState = appState
@@ -112,8 +114,19 @@ private struct DirectoriesSettingsView: View {
             }
 
             HStack {
-                Button(action: addDirectory) {
+                Button { isImporting = true } label: {
                     Label("Add", systemImage: "plus")
+                }
+                .fileImporter(
+                    isPresented: $isImporting,
+                    allowedContentTypes: [.folder],
+                    allowsMultipleSelection: false
+                ) { result in
+                    if case .success(let urls) = result, let url = urls.first {
+                        Task { @MainActor in
+                            appState.addWatchedRoot(url)
+                        }
+                    }
                 }
                 Button(action: removeSelected) {
                     Label("Remove", systemImage: "minus")
@@ -154,20 +167,6 @@ private struct DirectoriesSettingsView: View {
                 .foregroundStyle(.secondary)
         }
         .padding()
-    }
-
-    private func addDirectory() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Select Root Directory"
-        panel.begin { [appState] response in
-            guard response == .OK, let url = panel.url else { return }
-            Task { @MainActor in
-                appState.addWatchedRoot(url)
-            }
-        }
     }
 
     private func removeSelected() {
