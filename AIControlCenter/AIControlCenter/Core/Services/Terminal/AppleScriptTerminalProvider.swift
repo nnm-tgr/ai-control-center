@@ -48,59 +48,59 @@ struct AppleScriptTerminalProvider: TerminalProvider {
     }
 
     private func jumpScript(for type: TerminalProviderType, path: String) -> String {
-        // Escape for AppleScript string literal (\\ and \" are the only special sequences)
+        // Escape for AppleScript string literal
         let asPath = path
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
 
-        // do shell script: lsof finds PIDs with CWD = project path, ps maps PID → TTY.
-        // Runs via osascript (outside app sandbox). Path passed via AppleScript's
-        // `quoted form of` to safely handle spaces and special characters.
-        // `+d` restricts lsof to the exact directory; `-d cwd` narrows to the cwd descriptor.
-        let ttyBlock = #"""
-set projectPath to "\#(asPath)"
-set ttyOutput to ""
-try
-    set ttyOutput to do shell script "{ lsof -a -d cwd -Fp +d " & quoted form of projectPath & " | sed 's/^p//' | while read pid; do ps -p $pid -o tty= 2>/dev/null; done | tr -d ' ' | grep -v '??' | sort -u | sed 's|^|/dev/tty|'; } 2>/dev/null || true"
-end try
-set ttyList to paragraphs of ttyOutput
-"""#
-
+        // Strategy: iterate Terminal.app tabs via AppleScript to get each tab's TTY device,
+        // then run a targeted shell command per TTY to check only that shell process's CWD.
+        // This avoids the broad lsof +d scan which triggers permission errors for system processes.
+        //
+        // Per-tab shell pipeline:
+        //   ps -t <tty> -o pid=   → PID of the foreground shell on that TTY
+        //   lsof -p <pid> -d cwd  → CWD of that specific process (no broad scan, no permission errors)
         switch type {
         case .terminal:
-            return ttyBlock + #"""
-
+            return #"""
+set projectPath to "\#(asPath)"
 tell application "Terminal"
     activate
     repeat with w in windows
         repeat with t in tabs of w
-            repeat with tt in ttyList
-                if tt is not "" and tty of t is equal to tt then
-                    set frontmost of w to true
-                    set selected of t to true
-                    return true
-                end if
-            end repeat
+            set tabTTY to tty of t
+            set cwdResult to ""
+            try
+                set cwdResult to do shell script "pid=$(ps -t $(echo " & tabTTY & " | sed 's|/dev/||') -o pid= 2>/dev/null | head -1 | tr -d ' '); [ -n \"$pid\" ] && lsof -p $pid -d cwd -Fn 2>/dev/null | grep '^n' | cut -c2- || true"
+            end try
+            if cwdResult = projectPath then
+                set frontmost of w to true
+                set selected of t to true
+                return true
+            end if
         end repeat
     end repeat
 end tell
 return false
 """#
         case .iTerm2:
-            return ttyBlock + #"""
-
+            return #"""
+set projectPath to "\#(asPath)"
 tell application "iTerm2"
     activate
     repeat with w in windows
         repeat with t in tabs of w
             repeat with s in sessions of t
-                repeat with tt in ttyList
-                    if tt is not "" and tty of s is equal to tt then
-                        set current window to w
-                        set current tab of w to t
-                        return true
-                    end if
-                end repeat
+                set sessionTTY to tty of s
+                set cwdResult to ""
+                try
+                    set cwdResult to do shell script "pid=$(ps -t $(echo " & sessionTTY & " | sed 's|/dev/||') -o pid= 2>/dev/null | head -1 | tr -d ' '); [ -n \"$pid\" ] && lsof -p $pid -d cwd -Fn 2>/dev/null | grep '^n' | cut -c2- || true"
+                end try
+                if cwdResult = projectPath then
+                    set current window to w
+                    set current tab of w to t
+                    return true
+                end if
             end repeat
         end repeat
     end repeat
