@@ -131,25 +131,45 @@ struct DashboardView: View {
 
         case .grouped(let project, let groupID, _):
             soloRow(project, indent: 20, groupID: groupID)
+
+        case .memoArea(let projectID, _, _, let isExpanded):
+            MemoAreaView(
+                text: Binding(
+                    get: { viewModel.memos[projectID] ?? "" },
+                    set: { viewModel.setMemo(id: projectID, text: $0) }
+                ),
+                isExpanded: isExpanded
+            )
         }
     }
 
-    // Insert zone appears after .solo, after collapsed .groupHeader, and after the last child of a group
+    // .memoArea is always present for every project row, so it is the sole provider of insert zones
+    // for solo and grouped rows. .solo and .grouped always return nil here.
     private func insertZoneAfterID(for row: DashboardViewModel.FlatRow) -> UUID? {
         switch row {
-        case .solo(let p):
-            return p.id
+        case .solo:
+            return nil
         case .groupHeader(let id, _, _, let isExpanded):
             return isExpanded ? nil : id
-        case .grouped(_, let gid, let isLast):
-            return isLast ? gid : nil
+        case .grouped:
+            return nil
+        case .memoArea(let projectID, let groupID, let isLastInGroup, _):
+            if let gid = groupID { return isLastInGroup ? gid : nil }
+            return projectID
         }
     }
 
     // MARK: - Solo Row
 
     private func soloRow(_ project: Project, indent: CGFloat = 0, groupID: UUID? = nil) -> some View {
-        AgentRowView(project: project, isSelected: viewModel.selectedProjectID == project.id, indent: indent)
+        AgentRowView(
+            project: project,
+            isSelected: viewModel.selectedProjectID == project.id,
+            indent: indent,
+            hasMemo: !(viewModel.memos[project.id]?.isEmpty ?? true),
+            isMemoOpen: viewModel.expandedMemoIDs.contains(project.id),
+            onMemoToggle: { viewModel.toggleMemo(id: project.id) }
+        )
             .draggable(project.id.uuidString) {
                 dragPreview(name: project.name, status: project.aggregatedStatus)
             }
@@ -300,6 +320,30 @@ struct DashboardView: View {
     private func syncProjects() {
         viewModel.projects = appState.projects
         viewModel.syncLayout()
+    }
+}
+
+// MARK: - Memo Area
+
+private struct MemoAreaView: View {
+    @Binding var text: String
+    let isExpanded: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if isExpanded {
+                TextField("引き継ぎメモ、残タスク、次の作業など...", text: $text, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.callout)
+                    .lineLimit(3...8)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(Color(nsColor: .controlBackgroundColor).opacity(0.7))
+                    .transition(.opacity)
+            }
+        }
+        .clipped()
+        .animation(.spring(duration: 0.25), value: isExpanded)
     }
 }
 

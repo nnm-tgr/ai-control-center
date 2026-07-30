@@ -89,6 +89,28 @@ extension DashboardLayout.Entry: Codable {
     }
 }
 
+// MARK: - Memo Persistence
+
+enum MemoStore {
+    private static let key = "projectMemos_v1"
+
+    static func load() -> [UUID: String] {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let raw = try? JSONDecoder().decode([String: String].self, from: data)
+        else { return [:] }
+        return Dictionary(uniqueKeysWithValues: raw.compactMap { k, v in
+            UUID(uuidString: k).map { ($0, v) }
+        })
+    }
+
+    static func save(_ memos: [UUID: String]) {
+        let raw = Dictionary(uniqueKeysWithValues: memos.map { ($0.key.uuidString, $0.value) })
+        if let data = try? JSONEncoder().encode(raw) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+}
+
 // MARK: - Layout Persistence
 
 enum DashboardLayoutStore {
@@ -122,6 +144,8 @@ final class DashboardViewModel {
     var searchText: String = ""
     var selectedProjectID: UUID?
     var layout: DashboardLayout = DashboardLayoutStore.load()
+    var memos: [UUID: String] = MemoStore.load()
+    var expandedMemoIDs: Set<UUID> = []
 
     // MARK: - Layout Sync
 
@@ -313,6 +337,25 @@ final class DashboardViewModel {
         DashboardLayoutStore.save(layout)
     }
 
+    // MARK: - Memo Operations
+
+    func toggleMemo(id: UUID) {
+        if expandedMemoIDs.contains(id) {
+            expandedMemoIDs.remove(id)
+        } else {
+            expandedMemoIDs.insert(id)
+        }
+    }
+
+    func setMemo(id: UUID, text: String) {
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            memos.removeValue(forKey: id)
+        } else {
+            memos[id] = text
+        }
+        MemoStore.save(memos)
+    }
+
     func dissolveGroup(id: UUID) {
         guard let idx = layout.entries.firstIndex(where: { $0.id == id }),
               case .group(let g) = layout.entries[idx]
@@ -360,12 +403,15 @@ final class DashboardViewModel {
         case solo(Project)
         case groupHeader(id: UUID, name: String, projects: [Project], isExpanded: Bool)
         case grouped(Project, groupID: UUID, isLast: Bool)
+        // Always present for every visible project; isExpanded drives the height animation.
+        case memoArea(projectID: UUID, groupID: UUID?, isLastInGroup: Bool, isExpanded: Bool)
 
         var id: String {
             switch self {
             case .solo(let p): p.id.uuidString
             case .groupHeader(let id, _, _, _): "gh_\(id)"
             case .grouped(let p, _, _): "gc_\(p.id)"
+            case .memoArea(let projectID, _, _, _): "memo_\(projectID)"
             }
         }
     }
@@ -376,11 +422,14 @@ final class DashboardViewModel {
             switch item {
             case .solo(let p):
                 rows.append(.solo(p))
+                rows.append(.memoArea(projectID: p.id, groupID: nil, isLastInGroup: false, isExpanded: expandedMemoIDs.contains(p.id)))
             case .group(let id, let name, let projects, let isExpanded):
                 rows.append(.groupHeader(id: id, name: name, projects: projects, isExpanded: isExpanded))
                 if isExpanded {
                     for (i, p) in projects.enumerated() {
-                        rows.append(.grouped(p, groupID: id, isLast: i == projects.count - 1))
+                        let isLast = i == projects.count - 1
+                        rows.append(.grouped(p, groupID: id, isLast: isLast))
+                        rows.append(.memoArea(projectID: p.id, groupID: id, isLastInGroup: isLast, isExpanded: expandedMemoIDs.contains(p.id)))
                     }
                 }
             }
