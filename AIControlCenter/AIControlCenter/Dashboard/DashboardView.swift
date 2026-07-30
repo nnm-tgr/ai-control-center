@@ -252,20 +252,6 @@ struct DashboardView: View {
         ToolbarItem(placement: .primaryAction) { filterMenu }
         ToolbarItem(placement: .primaryAction) { sortMenu }
         ToolbarItem(placement: .primaryAction) {
-            Button {
-                Task { await appState.refresh() }
-            } label: {
-                if appState.isScanning {
-                    ProgressView().scaleEffect(0.7)
-                } else {
-                    Image(systemName: "arrow.clockwise")
-                }
-            }
-            .help("Refresh (⌘R)")
-            .keyboardShortcut("r", modifiers: .command)
-            .disabled(appState.isScanning)
-        }
-        ToolbarItem(placement: .primaryAction) {
             SettingsLink { Image(systemName: "gear") }
                 .help("Settings (⌘,)")
         }

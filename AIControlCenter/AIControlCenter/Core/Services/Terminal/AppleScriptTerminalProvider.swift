@@ -37,7 +37,105 @@ struct AppleScriptTerminalProvider: TerminalProvider {
         }
     }
 
+    // MARK: - Jump to Existing Session
+
+    /// 既存のターミナルウィンドウ/タブで projectDirectory にいるセッションにフォーカスする。
+    /// 見つかれば true、一致なしは false を返す。
+    func jumpToExisting(workingDirectory: URL) async throws -> Bool {
+        let script = jumpScript(for: providerType, path: workingDirectory.path)
+        guard !script.isEmpty else { return false }
+        return try await runAppleScriptReturningBool(script, terminalName: providerType.displayName)
+    }
+
+    private func jumpScript(for type: TerminalProviderType, path: String) -> String {
+        // Escape for AppleScript string literal (\\ and \" are the only special sequences)
+        let asPath = path
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+
+        // do shell script: lsof finds PIDs with CWD = project path, ps maps PID → TTY.
+        // Runs via osascript (outside app sandbox). Path passed via AppleScript's
+        // `quoted form of` to safely handle spaces and special characters.
+        // `+d` restricts lsof to the exact directory; `-d cwd` narrows to the cwd descriptor.
+        let ttyBlock = #"""
+set projectPath to "\#(asPath)"
+set ttyOutput to ""
+try
+    set ttyOutput to do shell script "lsof -a -d cwd -Fp +d " & quoted form of projectPath & " 2>/dev/null | sed 's/^p//' | while read pid; do ps -p $pid -o tty= 2>/dev/null; done | tr -d ' ' | grep -v '??' | sort -u | sed 's|^|/dev/tty|'"
+end try
+set ttyList to paragraphs of ttyOutput
+"""#
+
+        switch type {
+        case .terminal:
+            return ttyBlock + #"""
+
+tell application "Terminal"
+    activate
+    repeat with w in windows
+        repeat with t in tabs of w
+            repeat with tt in ttyList
+                if tt is not "" and tty of t is equal to tt then
+                    set frontmost of w to true
+                    set selected of t to true
+                    return true
+                end if
+            end repeat
+        end repeat
+    end repeat
+end tell
+return false
+"""#
+        case .iTerm2:
+            return ttyBlock + #"""
+
+tell application "iTerm2"
+    activate
+    repeat with w in windows
+        repeat with t in tabs of w
+            repeat with s in sessions of t
+                repeat with tt in ttyList
+                    if tt is not "" and tty of s is equal to tt then
+                        set current window to w
+                        set current tab of w to t
+                        return true
+                    end if
+                end repeat
+            end repeat
+        end repeat
+    end repeat
+end tell
+return false
+"""#
+        default:
+            return ""
+        }
+    }
+
     // MARK: - Execution
+
+    private func runAppleScriptReturningBool(_ source: String, terminalName: String) async throws -> Bool {
+        return try await withCheckedThrowingContinuation { continuation in
+            var error: NSDictionary?
+            let script = NSAppleScript(source: source)
+            let result = script?.executeAndReturnError(&error)
+            if let error {
+                let code = error[NSAppleScript.errorNumber] as? Int ?? 0
+                if code == -1743 {
+                    continuation.resume(throwing: AppError.terminal(
+                        .automationPermissionDenied(terminalName: terminalName)
+                    ))
+                } else {
+                    let reason = error[NSAppleScript.errorMessage] as? String ?? "Unknown error"
+                    continuation.resume(throwing: AppError.terminal(
+                        .activationFailed(reason: reason)
+                    ))
+                }
+            } else {
+                continuation.resume(returning: result?.booleanValue ?? false)
+            }
+        }
+    }
 
     private func runAppleScript(_ source: String, terminalName: String) async throws {
         guard !source.isEmpty else {

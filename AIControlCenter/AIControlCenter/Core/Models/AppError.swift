@@ -28,6 +28,7 @@ enum AppError: Error, Sendable {
         case activationFailed(reason: String)
         case automationPermissionDenied(terminalName: String)
         case automationFallbackUsed(terminalName: String, copiedPath: String)
+        case sessionNotFound(path: String)
     }
 
     enum GitError: Sendable {
@@ -59,6 +60,8 @@ enum AppError: Error, Sendable {
             "Automation permission denied for \(name)."
         case .terminal(.automationFallbackUsed(let name, _)):
             "Automation denied for \(name). cd command copied to clipboard."
+        case .terminal(.sessionNotFound):
+            "No active terminal session found for this project directory."
         case .git(.notARepository(let url)):
             "\(url.lastPathComponent) is not a git repository."
         case .git(.commandFailed(let code, let stderr)):

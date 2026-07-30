@@ -30,6 +30,22 @@ final class TerminalService {
         }
     }
 
+    /// 指定プロジェクトのディレクトリにいる既存のターミナルセッションにフォーカスする。
+    /// 見つからない場合は AppError.terminal(.sessionNotFound) を throw する。
+    func jump(to workingDirectory: URL, providerType: TerminalProviderType) async throws {
+        switch providerType {
+        case .terminal, .iTerm2:
+            let provider = AppleScriptTerminalProvider(providerType: providerType)
+            let found = try await provider.jumpToExisting(workingDirectory: workingDirectory)
+            if !found {
+                throw AppError.terminal(.sessionNotFound(path: workingDirectory.path))
+            }
+        case .warp, .ghostty:
+            // URL scheme providers don't support jumping to existing windows
+            throw AppError.terminal(.sessionNotFound(path: workingDirectory.path))
+        }
+    }
+
     // MARK: - Provider Factory
 
     private func makeProvider(for type: TerminalProviderType) -> any TerminalProvider {
