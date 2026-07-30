@@ -61,7 +61,7 @@ struct AppleScriptTerminalProvider: TerminalProvider {
 set projectPath to "\#(asPath)"
 set ttyOutput to ""
 try
-    set ttyOutput to do shell script "lsof -a -d cwd -Fp +d " & quoted form of projectPath & " 2>/dev/null | sed 's/^p//' | while read pid; do ps -p $pid -o tty= 2>/dev/null; done | tr -d ' ' | grep -v '??' | sort -u | sed 's|^|/dev/tty|'"
+    set ttyOutput to do shell script "{ lsof -a -d cwd -Fp +d " & quoted form of projectPath & " | sed 's/^p//' | while read pid; do ps -p $pid -o tty= 2>/dev/null; done | tr -d ' ' | grep -v '??' | sort -u | sed 's|^|/dev/tty|'; } 2>/dev/null || true"
 end try
 set ttyList to paragraphs of ttyOutput
 """#
