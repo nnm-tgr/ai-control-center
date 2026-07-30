@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 
 /// Terminal.app と iTerm2 向け AppleScript 実装
 struct AppleScriptTerminalProvider: TerminalProvider {
@@ -39,86 +40,148 @@ struct AppleScriptTerminalProvider: TerminalProvider {
 
     // MARK: - Jump to Existing Session
 
-    /// 既存のターミナルウィンドウ/タブで projectDirectory にいるセッションにフォーカスする。
-    /// 見つかれば true、一致なしは false を返す。
+    /// 指定ディレクトリにいる既存のターミナルセッションにフォーカスする。
+    /// lsof を使わず proc_pidinfo (Swift直接呼び出し) + ps -t でCWDを取得する。
     func jumpToExisting(workingDirectory: URL) async throws -> Bool {
-        let script = jumpScript(for: providerType, path: workingDirectory.path)
-        guard !script.isEmpty else { return false }
-        return try await runAppleScriptReturningBool(script, terminalName: providerType.displayName)
+        switch providerType {
+        case .terminal:
+            return try await jumpInTerminalApp(workingDirectory: workingDirectory)
+        case .iTerm2:
+            return try await jumpInITerm2(workingDirectory: workingDirectory)
+        default:
+            return false
+        }
     }
 
-    private func jumpScript(for type: TerminalProviderType, path: String) -> String {
-        // Escape for AppleScript string literal
-        let asPath = path
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
+    // MARK: - CWD via proc_pidinfo (no lsof, no subprocess)
+    //
+    // proc_vnodepathinfo layout (sys/proc_info.h):
+    //   vinfo_stat:       152 bytes
+    //   vnode_info:       vinfo_stat(152) + vi_type(4) + vi_pad(4) + vi_fsid(8) = 168 bytes
+    //   vnode_info_path:  vnode_info(168) + vip_path[MAXPATHLEN=1024]
+    //   pvi_cdir.vip_path starts at offset 168
 
-        // Strategy: iterate Terminal.app tabs via AppleScript to get each tab's TTY device,
-        // then run a targeted shell command per TTY to check only that shell process's CWD.
-        // This avoids the broad lsof +d scan which triggers permission errors for system processes.
-        //
-        // Per-tab shell pipeline:
-        //   ps -t <tty> -o pid=   → PID of the foreground shell on that TTY
-        //   lsof -p <pid> -d cwd  → CWD of that specific process (no broad scan, no permission errors)
-        switch type {
-        case .terminal:
-            return #"""
-set projectPath to "\#(asPath)"
+    private static let cwdPathOffset = 168
+
+    private func cwdForPID(_ pid: pid_t) -> String? {
+        var buffer = [UInt8](repeating: 0, count: 8192)
+        let ret = buffer.withUnsafeMutableBytes {
+            Darwin.proc_pidinfo(pid, 9 /* PROC_PIDVNODEPATHINFO */, 0, $0.baseAddress, Int32($0.count))
+        }
+        guard ret > 0 else { return nil }
+        return buffer.withUnsafeBytes { raw in
+            let cStr = raw.baseAddress!
+                .advanced(by: Self.cwdPathOffset)
+                .assumingMemoryBound(to: CChar.self)
+            let s = String(cString: cStr)
+            return s.isEmpty ? nil : s
+        }
+    }
+
+    // MARK: - Terminal.app
+
+    private struct TabInfo {
+        let windowIndex: Int
+        let tabIndex: Int
+        let pid: pid_t
+    }
+
+    private func jumpInTerminalApp(workingDirectory: URL) async throws -> Bool {
+        // One AppleScript call that returns "wi:ti:pid\n" lines.
+        // Uses `ps -t <tty>` per tab — lightweight, no lsof, no permission errors.
+        let infoScript = """
 tell application "Terminal"
-    activate
-    repeat with w in windows
-        repeat with t in tabs of w
-            set tabTTY to tty of t
-            set cwdResult to ""
+    set out to ""
+    repeat with wi from 1 to count of windows
+        repeat with ti from 1 to count of tabs of window wi
+            set ttyPath to tty of tab ti of window wi
+            set p to ""
             try
-                set cwdResult to do shell script "pid=$(ps -t $(echo " & tabTTY & " | sed 's|/dev/||') -o pid= 2>/dev/null | head -1 | tr -d ' '); [ -n \"$pid\" ] && lsof -p $pid -d cwd -Fn 2>/dev/null | grep '^n' | cut -c2- || true"
+                set p to do shell script "ps -t " & quoted form of ttyPath & " -o pid= 2>/dev/null | head -1 | tr -d ' '"
             end try
-            if cwdResult = projectPath then
-                set frontmost of w to true
-                set selected of t to true
-                return true
+            if p is not "" then
+                set out to out & wi & ":" & ti & ":" & p & linefeed
             end if
         end repeat
     end repeat
+    return out
 end tell
-return false
-"""#
-        case .iTerm2:
-            return #"""
-set projectPath to "\#(asPath)"
-tell application "iTerm2"
+"""
+        let raw = try await runAppleScriptReturningString(infoScript, terminalName: providerType.displayName)
+
+        for tab in parseTabInfo(from: raw) {
+            guard let cwd = cwdForPID(tab.pid), cwd == workingDirectory.path else { continue }
+            let focusScript = """
+tell application "Terminal"
     activate
-    repeat with w in windows
-        repeat with t in tabs of w
-            repeat with s in sessions of t
-                set sessionTTY to tty of s
-                set cwdResult to ""
+    set frontmost of window \(tab.windowIndex) to true
+    set selected of tab \(tab.tabIndex) of window \(tab.windowIndex) to true
+end tell
+"""
+            try await runAppleScript(focusScript, terminalName: providerType.displayName)
+            return true
+        }
+        return false
+    }
+
+    // MARK: - iTerm2
+
+    private func jumpInITerm2(workingDirectory: URL) async throws -> Bool {
+        let infoScript = """
+tell application "iTerm2"
+    set out to ""
+    repeat with wi from 1 to count of windows
+        repeat with ti from 1 to count of tabs of window wi
+            repeat with s in sessions of tab ti of window wi
+                set ttyPath to tty of s
+                set p to ""
                 try
-                    set cwdResult to do shell script "pid=$(ps -t $(echo " & sessionTTY & " | sed 's|/dev/||') -o pid= 2>/dev/null | head -1 | tr -d ' '); [ -n \"$pid\" ] && lsof -p $pid -d cwd -Fn 2>/dev/null | grep '^n' | cut -c2- || true"
+                    set p to do shell script "ps -t " & quoted form of ttyPath & " -o pid= 2>/dev/null | head -1 | tr -d ' '"
                 end try
-                if cwdResult = projectPath then
-                    set current window to w
-                    set current tab of w to t
-                    return true
+                if p is not "" then
+                    set out to out & wi & ":" & ti & ":" & p & linefeed
                 end if
             end repeat
         end repeat
     end repeat
+    return out
 end tell
-return false
-"""#
-        default:
-            return ""
+"""
+        let raw = try await runAppleScriptReturningString(infoScript, terminalName: providerType.displayName)
+
+        for tab in parseTabInfo(from: raw) {
+            guard let cwd = cwdForPID(tab.pid), cwd == workingDirectory.path else { continue }
+            let focusScript = """
+tell application "iTerm2"
+    activate
+    set current window to window \(tab.windowIndex)
+    set current tab of window \(tab.windowIndex) to tab \(tab.tabIndex) of window \(tab.windowIndex)
+end tell
+"""
+            try await runAppleScript(focusScript, terminalName: providerType.displayName)
+            return true
+        }
+        return false
+    }
+
+    private func parseTabInfo(from raw: String) -> [TabInfo] {
+        raw.components(separatedBy: "\n").compactMap { line in
+            let parts = line.components(separatedBy: ":")
+            guard parts.count == 3,
+                  let wi = Int(parts[0]),
+                  let ti = Int(parts[1]),
+                  let pid = pid_t(parts[2].trimmingCharacters(in: .whitespaces))
+            else { return nil }
+            return TabInfo(windowIndex: wi, tabIndex: ti, pid: pid)
         }
     }
 
     // MARK: - Execution
 
-    private func runAppleScriptReturningBool(_ source: String, terminalName: String) async throws -> Bool {
+    private func runAppleScriptReturningString(_ source: String, terminalName: String) async throws -> String {
         return try await withCheckedThrowingContinuation { continuation in
             var error: NSDictionary?
-            let script = NSAppleScript(source: source)
-            let result = script?.executeAndReturnError(&error)
+            let result = NSAppleScript(source: source)?.executeAndReturnError(&error)
             if let error {
                 let code = error[NSAppleScript.errorNumber] as? Int ?? 0
                 if code == -1743 {
@@ -132,7 +195,7 @@ return false
                     ))
                 }
             } else {
-                continuation.resume(returning: result?.booleanValue ?? false)
+                continuation.resume(returning: result?.stringValue ?? "")
             }
         }
     }
@@ -150,7 +213,6 @@ return false
             if let error {
                 let code = error[NSAppleScript.errorNumber] as? Int ?? 0
                 if code == -1743 {
-                    // -1743: Automation permission denied by user
                     continuation.resume(throwing: AppError.terminal(
                         .automationPermissionDenied(terminalName: terminalName)
                     ))
