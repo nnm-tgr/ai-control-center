@@ -146,6 +146,10 @@ final class DashboardViewModel {
     var layout: DashboardLayout
     var memos: [UUID: String]
     var expandedMemoIDs: Set<UUID> = []
+    var tasksVisible: Bool = true
+    var taskScopeFilter: TaskScopeFilter = .all
+    var isAddTaskPresented: Bool = false
+    var addTaskDefaultScope: TaskScope? = nil
 
     init() {
         let savedLayout = DashboardLayoutStore.load()

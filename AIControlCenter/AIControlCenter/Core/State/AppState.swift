@@ -31,6 +31,10 @@ final class AppState {
 
     var pendingApprovals: [ToolApprovalRequest] { toolApproval.pendingApprovals }
 
+    // MARK: - Tasks
+
+    let taskStore = TaskStore()
+
     // MARK: - Services
 
     private let scanner = ProjectScannerService()
