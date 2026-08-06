@@ -139,13 +139,24 @@ final class DashboardViewModel {
     // MARK: - State
 
     var projects: [Project] = []
-    var sortOrder: SortOrder = .statusPriority
+    var sortOrder: SortOrder
     var filterGroup: StatusGroup = .all
     var searchText: String = ""
     var selectedProjectID: UUID?
-    var layout: DashboardLayout = DashboardLayoutStore.load()
-    var memos: [UUID: String] = MemoStore.load()
+    var layout: DashboardLayout
+    var memos: [UUID: String]
     var expandedMemoIDs: Set<UUID> = []
+
+    init() {
+        let savedLayout = DashboardLayoutStore.load()
+        self.layout = savedLayout
+        self.memos = MemoStore.load()
+        // Restore custom sort when the saved layout has user-arranged groups.
+        // Without this, sortOrder resets to .statusPriority on every relaunch
+        // and groups become invisible even though they're still on disk.
+        let hasGroups = savedLayout.entries.contains { if case .group = $0 { return true }; return false }
+        self.sortOrder = hasGroups ? .custom : .statusPriority
+    }
 
     // MARK: - Layout Sync
 
@@ -290,12 +301,22 @@ final class DashboardViewModel {
         }
 
         if let idx = layout.entries.firstIndex(where: { $0.id == targetID }) {
+            // Target is a top-level entry (solo or group header)
             switch layout.entries[idx] {
             case .solo(let existingID):
                 layout.entries[idx] = .group(.init(id: UUID(), name: "Group", projectIDs: [existingID, draggingID]))
             case .group(var g):
                 if !g.projectIDs.contains(draggingID) { g.projectIDs.append(draggingID) }
                 layout.entries[idx] = .group(g)
+            }
+        } else if let groupIdx = layout.entries.firstIndex(where: {
+            // Target is a member inside an existing group — add draggingID to that group
+            guard case .group(let g) = $0 else { return false }
+            return g.projectIDs.contains(targetID)
+        }) {
+            if case .group(var g) = layout.entries[groupIdx] {
+                if !g.projectIDs.contains(draggingID) { g.projectIDs.append(draggingID) }
+                layout.entries[groupIdx] = .group(g)
             }
         } else {
             layout.entries.append(entry)

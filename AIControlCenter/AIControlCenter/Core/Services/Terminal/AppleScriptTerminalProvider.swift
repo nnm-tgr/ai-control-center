@@ -53,7 +53,10 @@ struct AppleScriptTerminalProvider: TerminalProvider {
             withBundleIdentifier: providerType.bundleIdentifier
         ).isEmpty else { return false }
 
-        let targetPath = workingDirectory.path
+        // Canonicalize via resolvingSymlinksInPath so kernel-resolved CWDs
+        // (which follow firmlinks: /tmp → /private/tmp, /var → /private/var)
+        // compare equal to user-visible paths stored in settings.
+        let targetPath = workingDirectory.resolvingSymlinksInPath().path
         let parentPath = URL(fileURLWithPath: targetPath).deletingLastPathComponent().path
 
         // Build tty→pids map once; sysctl per TTY is cheap but no need to call twice.
