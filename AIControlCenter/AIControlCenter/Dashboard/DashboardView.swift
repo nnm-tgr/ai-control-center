@@ -18,6 +18,9 @@ struct DashboardView: View {
             .onAppear { syncProjects() }
             .onChange(of: appState.projects) { _, _ in syncProjects() }
             .onChange(of: appState.settings.watchedRootURLs) { _, _ in syncProjects() }
+            .overlay(alignment: .top) {
+                BannerOverlayView()
+            }
 
             ApprovalOverlayView()
         }

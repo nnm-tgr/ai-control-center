@@ -48,9 +48,15 @@ struct AgentDetailView: View {
             )
         } catch AppError.terminal(.sessionNotFound) {
             appState.pendingBanners.append(BannerMessage(
-                message: "No terminal session found at \(project.rootURL.lastPathComponent)",
+                message: "No terminal session found for \(project.rootURL.lastPathComponent)",
                 level: .warning,
                 autoDismissAfter: 5
+            ))
+        } catch AppError.terminal(.automationPermissionDenied(let name)) {
+            appState.pendingBanners.append(BannerMessage(
+                message: "Automation permission denied for \(name). Open System Settings > Privacy & Security > Automation.",
+                level: .error,
+                autoDismissAfter: 10
             ))
         } catch {
             appState.pendingBanners.append(BannerMessage(
