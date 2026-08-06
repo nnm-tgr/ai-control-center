@@ -44,7 +44,7 @@ enum TaskPriority: String, Codable, CaseIterable, Comparable, Sendable {
 
 // MARK: - TaskScope
 
-enum TaskScope: Equatable, Sendable {
+enum TaskScope: Equatable, Hashable, Sendable {
     case project(rootURL: URL)
     case group(groupID: UUID)
     case global

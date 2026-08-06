@@ -325,7 +325,7 @@ struct DashboardView: View {
             } label: {
                 Label(
                     viewModel.tasksVisible ? "Hide Tasks" : "Show Tasks",
-                    systemImage: viewModel.tasksVisible ? "checklist" : "checklist"
+                    systemImage: "checklist"
                 )
             }
             .help(viewModel.tasksVisible ? "Hide tasks" : "Show tasks")

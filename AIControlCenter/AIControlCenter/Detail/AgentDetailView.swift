@@ -18,7 +18,7 @@ struct AgentDetailView: View {
                 headerSection
                 Divider().padding(.vertical, 12)
                 progressSection
-                if !appState.taskStore.rootTasks(forProjectURL: project.rootURL).isEmpty {
+                if viewModel.hasProjectTasks(in: appState.taskStore) {
                     Divider().padding(.vertical, 12)
                     taskSummarySection
                 }

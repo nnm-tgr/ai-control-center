@@ -26,6 +26,10 @@ final class AgentDetailViewModel {
     var needsAttention: Bool { agent?.needsAttention ?? false }
     var updatedAt: Date? { agent?.updatedAt }
 
+    func hasProjectTasks(in store: TaskStore) -> Bool {
+        !store.rootTasks(forProjectURL: project.rootURL).isEmpty
+    }
+
     /// activities は oldest-first で格納。reversed() は O(1) — コピーなし
     var reversedActivities: ReversedCollection<[Activity]> {
         agent?.activities.reversed() ?? [Activity]().reversed()

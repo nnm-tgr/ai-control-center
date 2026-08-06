@@ -158,7 +158,7 @@ final class DashboardViewModel {
         // Restore custom sort when the saved layout has user-arranged groups.
         // Without this, sortOrder resets to .statusPriority on every relaunch
         // and groups become invisible even though they're still on disk.
-        let hasGroups = savedLayout.entries.contains { if case .group = $0 { return true }; return false }
+        let hasGroups = savedLayout.entries.contains(where: \.isGroup)
         self.sortOrder = hasGroups ? .custom : .statusPriority
     }
 

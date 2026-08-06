@@ -12,30 +12,14 @@ struct AddEditTaskSheet: View {
     @State private var notes: String = ""
     @State private var status: TaskStatus = .todo
     @State private var priority: TaskPriority = .medium
-    @State private var selectedScope: ScopeSelection = .global
+    @State private var selectedScope: TaskScope = .global
     @State private var selectedParentID: UUID? = nil
 
     private var taskStore: TaskStore { appState.taskStore }
     private var isEditing: Bool { editingTask != nil }
 
-    // Scope picker model
-    private enum ScopeSelection: Hashable {
-        case global
-        case project(URL)
-        case group(UUID)
-
-        var taskScope: TaskScope {
-            switch self {
-            case .global:         .global
-            case .project(let u): .project(rootURL: u)
-            case .group(let id):  .group(groupID: id)
-            }
-        }
-    }
-
     var body: some View {
         VStack(spacing: 0) {
-            // Header
             HStack {
                 Text(isEditing ? "Edit Task" : "New Task")
                     .font(.headline)
@@ -53,14 +37,12 @@ struct AddEditTaskSheet: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    // Title
                     VStack(alignment: .leading, spacing: 6) {
                         label("Title")
                         TextField("Task title", text: $title)
                             .textFieldStyle(.roundedBorder)
                     }
 
-                    // Notes
                     VStack(alignment: .leading, spacing: 6) {
                         label("Notes")
                         TextEditor(text: $notes)
@@ -72,7 +54,6 @@ struct AddEditTaskSheet: View {
                             )
                     }
 
-                    // Priority
                     VStack(alignment: .leading, spacing: 6) {
                         label("Priority")
                         Picker("Priority", selection: $priority) {
@@ -83,7 +64,6 @@ struct AddEditTaskSheet: View {
                         .pickerStyle(.segmented)
                     }
 
-                    // Status (edit mode only)
                     if isEditing {
                         VStack(alignment: .leading, spacing: 6) {
                             label("Status")
@@ -96,18 +76,14 @@ struct AddEditTaskSheet: View {
                         }
                     }
 
-                    // Scope
                     VStack(alignment: .leading, spacing: 6) {
                         label("Scope")
                         scopePicker
                     }
 
-                    // Parent task (only shown when creating a subtask)
-                    if selectedParentID != nil || !isEditing {
-                        VStack(alignment: .leading, spacing: 6) {
-                            label("Parent Task (optional)")
-                            parentPicker
-                        }
+                    VStack(alignment: .leading, spacing: 6) {
+                        label("Parent Task (optional)")
+                        parentPicker
                     }
                 }
                 .padding(16)
@@ -121,17 +97,17 @@ struct AddEditTaskSheet: View {
 
     private var scopePicker: some View {
         Picker("Scope", selection: $selectedScope) {
-            Text("Global").tag(ScopeSelection.global)
+            Text("Global").tag(TaskScope.global)
             Divider()
             ForEach(appState.projects.filter(\.isReachable), id: \.id) { project in
                 Text(project.name)
-                    .tag(ScopeSelection.project(project.rootURL))
+                    .tag(TaskScope.project(rootURL: project.rootURL))
             }
             if !taskStore.taskGroups.isEmpty {
                 Divider()
                 ForEach(taskStore.taskGroups) { group in
                     Text(group.name)
-                        .tag(ScopeSelection.group(group.id))
+                        .tag(TaskScope.group(groupID: group.id))
                 }
             }
         }
@@ -170,17 +146,9 @@ struct AddEditTaskSheet: View {
             status = task.status
             priority = task.priority
             selectedParentID = task.parentID
-            selectedScope = scopeSelection(from: task.scope)
-        } else if let scope = defaultScope {
-            selectedScope = scopeSelection(from: scope)
-        }
-    }
-
-    private func scopeSelection(from scope: TaskScope) -> ScopeSelection {
-        switch scope {
-        case .global:          .global
-        case .project(let u):  .project(u)
-        case .group(let id):   .group(id)
+            selectedScope = task.scope
+        } else {
+            selectedScope = defaultScope ?? .global
         }
     }
 
@@ -193,19 +161,17 @@ struct AddEditTaskSheet: View {
             task.notes = notes
             task.status = status
             task.priority = priority
-            task.scope = selectedScope.taskScope
+            task.scope = selectedScope
             task.parentID = selectedParentID
             taskStore.updateTask(task)
         } else {
-            let newTask = TaskItem(
+            taskStore.addTask(TaskItem(
                 title: trimmed,
                 notes: notes,
-                status: .todo,
                 priority: priority,
-                scope: selectedScope.taskScope,
+                scope: selectedScope,
                 parentID: selectedParentID
-            )
-            taskStore.addTask(newTask)
+            ))
         }
         dismiss()
     }

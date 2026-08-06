@@ -8,25 +8,24 @@ struct TaskSectionView: View {
 
     private var taskStore: TaskStore { appState.taskStore }
 
-    private var rootTasks: [TaskItem] { taskStore.rootTasks(for: scopeFilter) }
-    private var doneCount: Int { taskStore.doneCount(for: scopeFilter) }
-    private var totalCount: Int { taskStore.totalCount(for: scopeFilter) }
-
     var body: some View {
+        let rootTasks = taskStore.rootTasks(for: scopeFilter)
+        let doneCount = rootTasks.filter(\.isDone).count
+
         VStack(spacing: 0) {
-            sectionHeader
+            sectionHeader(doneCount: doneCount, total: rootTasks.count)
             Divider()
             if rootTasks.isEmpty {
                 emptyState
             } else {
-                taskList
+                taskList(rootTasks: rootTasks)
             }
         }
     }
 
     // MARK: - Header
 
-    private var sectionHeader: some View {
+    private func sectionHeader(doneCount: Int, total: Int) -> some View {
         HStack {
             Text("TASKS")
                 .font(.caption)
@@ -36,8 +35,8 @@ struct TaskSectionView: View {
 
             Spacer()
 
-            if totalCount > 0 {
-                Text("\(doneCount) / \(totalCount)")
+            if total > 0 {
+                Text("\(doneCount) / \(total)")
                     .font(.caption)
                     .foregroundStyle(.tertiary)
                     .monospacedDigit()
@@ -65,15 +64,16 @@ struct TaskSectionView: View {
 
     // MARK: - Task List
 
-    private var taskList: some View {
-        LazyVStack(spacing: 0) {
+    private func taskList(rootTasks: [TaskItem]) -> some View {
+        let lastID = rootTasks.last?.id
+        return LazyVStack(spacing: 0) {
             ForEach(rootTasks) { task in
                 TaskRowView(
                     task: task,
                     taskStore: taskStore,
                     onEdit: onEditTask
                 )
-                if task.id != rootTasks.last?.id {
+                if task.id != lastID {
                     Divider().padding(.leading, 36)
                 }
             }

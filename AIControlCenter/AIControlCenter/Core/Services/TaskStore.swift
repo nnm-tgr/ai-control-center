@@ -11,24 +11,24 @@ final class TaskStore {
 
     // MARK: - Persistence
 
-    private static func appSupportURL() -> URL? {
+    private static let storeDirectory: URL? = {
         guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         else { return nil }
         let dir = base.appendingPathComponent("AIControlCenter", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
-    }
+    }()
 
-    private static func tasksURL()  -> URL? { appSupportURL()?.appendingPathComponent("tasks.json") }
-    private static func groupsURL() -> URL? { appSupportURL()?.appendingPathComponent("task-groups.json") }
+    private static var tasksURL:  URL? { storeDirectory?.appendingPathComponent("tasks.json") }
+    private static var groupsURL: URL? { storeDirectory?.appendingPathComponent("task-groups.json") }
 
     private func load() {
-        if let url = Self.tasksURL(),
+        if let url = Self.tasksURL,
            let data = try? Data(contentsOf: url),
            let decoded = try? JSONDecoder().decode([TaskItem].self, from: data) {
             tasks = decoded
         }
-        if let url = Self.groupsURL(),
+        if let url = Self.groupsURL,
            let data = try? Data(contentsOf: url),
            let decoded = try? JSONDecoder().decode([TaskGroup].self, from: data) {
             taskGroups = decoded
@@ -36,13 +36,13 @@ final class TaskStore {
     }
 
     private func saveTasks() {
-        guard let url = Self.tasksURL(),
+        guard let url = Self.tasksURL,
               let data = try? JSONEncoder().encode(tasks) else { return }
         try? data.write(to: url, options: .atomic)
     }
 
     private func saveGroups() {
-        guard let url = Self.groupsURL(),
+        guard let url = Self.groupsURL,
               let data = try? JSONEncoder().encode(taskGroups) else { return }
         try? data.write(to: url, options: .atomic)
     }
@@ -112,11 +112,11 @@ final class TaskStore {
     }
 
     func doneCount(for filter: TaskScopeFilter) -> Int {
-        tasks.filter { $0.parentID == nil && filter.matches($0.scope) && $0.isDone }.count
+        rootTasks(for: filter).filter(\.isDone).count
     }
 
     func totalCount(for filter: TaskScopeFilter) -> Int {
-        tasks.filter { $0.parentID == nil && filter.matches($0.scope) }.count
+        rootTasks(for: filter).count
     }
 
     func rootTasks(forProjectURL url: URL) -> [TaskItem] {
