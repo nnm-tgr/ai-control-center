@@ -56,26 +56,31 @@ struct AppleScriptTerminalProvider: TerminalProvider {
         let targetPath = workingDirectory.path
         let parentPath = URL(fileURLWithPath: targetPath).deletingLastPathComponent().path
 
-        let ttyPaths = try await fetchTTYPaths()
+        // Build tty→pids map once; sysctl per TTY is cheap but no need to call twice.
+        let ttyPIDMap: [(tty: String, pids: [pid_t])] = try await fetchTTYPaths()
+            .map { ($0, pidsForTTY($0)) }
 
         // Pass 1: exact match or cwd inside project
-        for ttyPath in ttyPaths {
-            for pid in pidsForTTY(ttyPath) {
+        for entry in ttyPIDMap {
+            for pid in entry.pids {
                 guard let cwd = cwdForPID(pid) else { continue }
                 if cwd == targetPath || cwd.hasPrefix(targetPath + "/") {
-                    return try await focusByTTY(ttyPath: ttyPath)
+                    return try await focusByTTY(ttyPath: entry.tty)
                 }
             }
         }
 
-        // Pass 2: cwd == direct parent of project root
-        // (common when user launched Claude Code from the repo root)
+        // Pass 2: cwd == direct parent of project root.
+        // Handles the common case where the user sits at the repo root
+        // and Claude Code's .ai/ lives one level deeper.
+        // Limitation: two projects sharing the same parent may both match
+        // the same terminal; first match wins.
         if parentPath != "/" {
-            for ttyPath in ttyPaths {
-                for pid in pidsForTTY(ttyPath) {
+            for entry in ttyPIDMap {
+                for pid in entry.pids {
                     guard let cwd = cwdForPID(pid) else { continue }
                     if cwd == parentPath {
-                        return try await focusByTTY(ttyPath: ttyPath)
+                        return try await focusByTTY(ttyPath: entry.tty)
                     }
                 }
             }
@@ -141,6 +146,11 @@ end tell
         var size = 0
         guard sysctl(&mib, 4, nil, &size, nil, 0) == 0, size > 0 else { return [] }
 
+        // Allocate based on the size hint from the first call. The second call
+        // overwrites size with the actual bytes written; excess slots stay
+        // zero-initialised so the pid > 0 filter below is safe. A TOCTOU race
+        // where new processes appear between calls is benign — we simply miss
+        // them this cycle.
         let count = size / MemoryLayout<kinfo_proc>.size
         var buffer = [kinfo_proc](repeating: kinfo_proc(), count: count + 1)
         let ret = buffer.withUnsafeMutableBytes { ptr in

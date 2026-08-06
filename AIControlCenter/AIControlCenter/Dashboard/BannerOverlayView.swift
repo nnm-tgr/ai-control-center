@@ -14,6 +14,7 @@ struct BannerOverlayView: View {
         .padding(.top, 8)
         .padding(.horizontal, 12)
         .frame(maxWidth: 560)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 }
 
@@ -71,4 +72,19 @@ private struct BannerItemView: View {
         case .error:   .red
         }
     }
+}
+
+#Preview("Banners — all levels") {
+    let state = AppState()
+    state.pendingBanners = [
+        BannerMessage(message: "Session jumped successfully.", level: .info, autoDismissAfter: nil),
+        BannerMessage(message: "No terminal session found for ai-control-center", level: .warning, autoDismissAfter: nil),
+        BannerMessage(message: "Automation permission denied for Terminal. Open System Settings > Privacy & Security > Automation.", level: .error, autoDismissAfter: nil),
+    ]
+    return ZStack(alignment: .top) {
+        Color(nsColor: .windowBackgroundColor)
+        BannerOverlayView()
+    }
+    .environment(state)
+    .frame(width: 600, height: 200)
 }
