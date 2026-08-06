@@ -1,6 +1,6 @@
 import Foundation
 
-enum AppError: Error, Sendable {
+enum AppError: Error, LocalizedError, Sendable {
     case fileWatcher(FileWatcherError)
     case statusParsing(StatusParsingError)
     case projectDiscovery(ProjectDiscoveryError)
@@ -68,6 +68,8 @@ enum AppError: Error, Sendable {
             "git exited with code \(code): \(stderr)"
         }
     }
+
+    var errorDescription: String? { localizedDescription }
 
     var recoverySuggestion: String? {
         switch self {
