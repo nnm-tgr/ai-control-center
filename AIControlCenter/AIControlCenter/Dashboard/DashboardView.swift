@@ -4,6 +4,7 @@ struct DashboardView: View {
     @Environment(AppState.self) private var appState
     @State private var viewModel = DashboardViewModel()
     @FocusState private var isSearchFocused: Bool
+    @State private var editingTask: TaskItem? = nil
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -33,6 +34,20 @@ struct DashboardView: View {
         VStack(spacing: 0) {
             searchBar
             Divider()
+            scopeFilterBar
+            Divider()
+            if viewModel.tasksVisible {
+                TaskSectionView(
+                    scopeFilter: viewModel.taskScopeFilter,
+                    onAddTask: { scope in
+                        viewModel.addTaskDefaultScope = scope
+                        viewModel.isAddTaskPresented = true
+                    },
+                    onEditTask: { task in editingTask = task }
+                )
+                .environment(appState)
+                Divider()
+            }
             columnHeader
             Divider()
 
@@ -42,6 +57,54 @@ struct DashboardView: View {
                 projectList
             }
         }
+        .sheet(isPresented: $viewModel.isAddTaskPresented) {
+            AddEditTaskSheet(defaultScope: viewModel.addTaskDefaultScope)
+                .environment(appState)
+        }
+        .sheet(item: $editingTask) { task in
+            AddEditTaskSheet(editingTask: task)
+                .environment(appState)
+        }
+    }
+
+    // MARK: - Scope Filter Bar
+
+    private var scopeFilterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                scopeChip("All", filter: .all)
+
+                ForEach(appState.projects.filter(\.isReachable), id: \.id) { project in
+                    scopeChip(project.name, filter: .project(rootURL: project.rootURL))
+                }
+
+                ForEach(appState.taskStore.taskGroups) { group in
+                    scopeChip(group.name, filter: .group(groupID: group.id))
+                }
+
+                scopeChip("Global", filter: .global)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+        }
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func scopeChip(_ label: String, filter: TaskScopeFilter) -> some View {
+        let isActive = viewModel.taskScopeFilter == filter
+        return Button {
+            viewModel.taskScopeFilter = filter
+        } label: {
+            Text(label)
+                .font(.caption)
+                .fontWeight(.medium)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 3)
+                .background(isActive ? Color.accentColor : Color.secondary.opacity(0.12))
+                .foregroundStyle(isActive ? .white : .secondary)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     private var searchBar: some View {
@@ -254,6 +317,19 @@ struct DashboardView: View {
         }
         ToolbarItem(placement: .primaryAction) { filterMenu }
         ToolbarItem(placement: .primaryAction) { sortMenu }
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    viewModel.tasksVisible.toggle()
+                }
+            } label: {
+                Label(
+                    viewModel.tasksVisible ? "Hide Tasks" : "Show Tasks",
+                    systemImage: "checklist"
+                )
+            }
+            .help(viewModel.tasksVisible ? "Hide tasks" : "Show tasks")
+        }
         ToolbarItem(placement: .primaryAction) {
             SettingsLink { Image(systemName: "gear") }
                 .help("Settings (⌘,)")

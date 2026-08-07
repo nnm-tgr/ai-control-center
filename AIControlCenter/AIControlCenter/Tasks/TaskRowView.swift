@@ -1,0 +1,232 @@
+import SwiftUI
+
+// MARK: - TaskRowView
+
+struct TaskRowView: View {
+    let task: TaskItem
+    let taskStore: TaskStore
+    let onEdit: (TaskItem) -> Void
+
+    @State private var showProgressPopover = false
+    @State private var draftProgress: Double = 0
+
+    private var category: TaskCategory? {
+        task.categoryID.flatMap { taskStore.category(id: $0) }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            rootRow
+            subtaskRows
+        }
+    }
+
+    // MARK: - Root row
+
+    private var rootRow: some View {
+        HStack(alignment: .center, spacing: 8) {
+            // Checkbox (quick done toggle)
+            Button { taskStore.toggleDone(id: task.id) } label: {
+                TaskStatusIndicatorView(status: task.status, size: 15)
+            }
+            .buttonStyle(.plain)
+
+            // Title + badges
+            VStack(alignment: .leading, spacing: 3) {
+                Text(task.title)
+                    .font(.callout)
+                    .foregroundStyle(task.isDone ? .tertiary : .primary)
+                    .strikethrough(task.isDone, color: Color.secondary)
+                    .lineLimit(1)
+
+                HStack(spacing: 4) {
+                    scopeBadge(task.scope)
+                    if let cat = category {
+                        badge(cat.name, color: Color(hex: cat.colorHex))
+                    }
+                    if task.priority != .medium {
+                        badge(task.priority.displayName, color: task.priority.color)
+                    }
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            // Status menu
+            statusMenu
+
+            // Progress
+            progressButton
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button("Edit") { onEdit(task) }
+            Divider()
+            Button("Delete", role: .destructive) { taskStore.deleteTask(id: task.id) }
+        }
+    }
+
+    // MARK: - Status menu
+
+    private var statusMenu: some View {
+        Menu {
+            ForEach(TaskStatus.allCases, id: \.self) { status in
+                Button {
+                    taskStore.setStatus(id: task.id, status: status)
+                } label: {
+                    Label(status.displayName, systemImage: status.iconName)
+                }
+            }
+        } label: {
+            Text(task.status.displayName)
+                .font(.caption2)
+                .fontWeight(.medium)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(task.status.color.opacity(0.13))
+                .foregroundStyle(task.status.color)
+                .clipShape(Capsule())
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    // MARK: - Progress button + popover
+
+    private var progressButton: some View {
+        Button {
+            draftProgress = Double(task.progress)
+            showProgressPopover = true
+        } label: {
+            Text("\(task.progress)%")
+                .font(.caption2.monospacedDigit())
+                .fontWeight(.medium)
+                .foregroundStyle(.secondary)
+                .frame(width: 34, alignment: .trailing)
+        }
+        .buttonStyle(.plain)
+        .popover(isPresented: $showProgressPopover, arrowEdge: .bottom) {
+            progressPopover
+        }
+    }
+
+    private var progressPopover: some View {
+        VStack(spacing: 12) {
+            HStack {
+                Text("Progress")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(Int(draftProgress))%")
+                    .font(.callout.monospacedDigit().bold())
+            }
+
+            Slider(value: $draftProgress, in: 0...100, step: 5)
+                .tint(task.status.color)
+                .frame(width: 180)
+
+            HStack(spacing: 8) {
+                ForEach([0, 25, 50, 75, 100], id: \.self) { pct in
+                    Button("\(pct)") {
+                        draftProgress = Double(pct)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                    .tint(pct == Int(draftProgress) ? task.status.color : nil)
+                }
+            }
+
+            HStack {
+                Button("Cancel") { showProgressPopover = false }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Set") {
+                    taskStore.setProgress(id: task.id, progress: Int(draftProgress))
+                    showProgressPopover = false
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+        }
+        .padding(14)
+        .frame(width: 220)
+    }
+
+    // MARK: - Subtask rows
+
+    private var subtaskRows: some View {
+        let children = taskStore.subtasks(of: task.id)
+        return ForEach(children) { child in
+            HStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.2))
+                        .frame(width: 1)
+                }
+                .frame(width: 16)
+                .padding(.leading, 20)
+
+                subtaskRow(child)
+            }
+        }
+    }
+
+    private func subtaskRow(_ item: TaskItem) -> some View {
+        HStack(alignment: .center, spacing: 8) {
+            Button { taskStore.toggleDone(id: item.id) } label: {
+                TaskStatusIndicatorView(status: item.status, size: 13, isSubtask: true)
+            }
+            .buttonStyle(.plain)
+
+            Text(item.title)
+                .font(.caption)
+                .foregroundStyle(item.isDone ? .tertiary : .secondary)
+                .strikethrough(item.isDone, color: Color.secondary)
+                .lineLimit(1)
+
+            Spacer(minLength: 0)
+
+            // Compact status indicator for subtask
+            Text(item.status.displayName)
+                .font(.caption2)
+                .foregroundStyle(item.status.color.opacity(0.8))
+        }
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button("Edit") { onEdit(item) }
+            Divider()
+            Button("Delete", role: .destructive) { taskStore.deleteTask(id: item.id) }
+        }
+    }
+
+    // MARK: - Badges
+
+    @ViewBuilder
+    private func scopeBadge(_ scope: TaskScope) -> some View {
+        switch scope {
+        case .project(let url): badge(url.lastPathComponent, color: .accentColor)
+        case .group:            badge("Group", color: .purple)
+        case .global:
+            Text("Global")
+                .font(.caption2).fontWeight(.medium)
+                .padding(.horizontal, 5).padding(.vertical, 1)
+                .background(Color.secondary.opacity(0.1))
+                .foregroundStyle(.secondary)
+                .clipShape(RoundedRectangle(cornerRadius: 3))
+        }
+    }
+
+    private func badge(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.caption2).fontWeight(.medium)
+            .padding(.horizontal, 5).padding(.vertical, 1)
+            .background(color.opacity(0.15))
+            .foregroundStyle(color)
+            .clipShape(RoundedRectangle(cornerRadius: 3))
+    }
+}

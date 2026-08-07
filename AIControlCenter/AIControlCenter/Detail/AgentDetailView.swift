@@ -18,6 +18,10 @@ struct AgentDetailView: View {
                 headerSection
                 Divider().padding(.vertical, 12)
                 progressSection
+                if viewModel.hasProjectTasks(in: appState.taskStore) {
+                    Divider().padding(.vertical, 12)
+                    taskSummarySection
+                }
                 Divider().padding(.vertical, 12)
                 activitySection
             }
@@ -176,6 +180,15 @@ struct AgentDetailView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Task Summary
+
+    private var taskSummarySection: some View {
+        TaskSummaryView(
+            projectURL: project.rootURL,
+            taskStore: appState.taskStore
+        )
     }
 
     // MARK: - Activity History
