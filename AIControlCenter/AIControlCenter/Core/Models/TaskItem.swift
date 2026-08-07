@@ -5,20 +5,32 @@ import Foundation
 enum TaskStatus: String, Codable, CaseIterable, Sendable {
     case todo
     case inProgress
+    case inReview
+    case onHold
     case done
-    case cancelled
 
     var displayName: String {
         switch self {
-        case .todo:      "To Do"
-        case .inProgress:"In Progress"
-        case .done:      "Done"
-        case .cancelled: "Cancelled"
+        case .todo:       "To Do"
+        case .inProgress: "In Progress"
+        case .inReview:   "In Review"
+        case .onHold:     "On Hold"
+        case .done:       "Done"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .todo:       "circle"
+        case .inProgress: "arrow.clockwise.circle"
+        case .inReview:   "eye.circle"
+        case .onHold:     "pause.circle"
+        case .done:       "checkmark.circle.fill"
         }
     }
 
     var isDone: Bool { self == .done }
-    var isActive: Bool { self == .todo || self == .inProgress }
+    var isActive: Bool { self == .inProgress || self == .inReview }
 }
 
 // MARK: - TaskPriority
@@ -154,6 +166,7 @@ struct TaskItem: Identifiable, Codable, Sendable, Equatable {
     var scope: TaskScope
     var parentID: UUID?
     var categoryID: UUID?
+    var progress: Int
     var createdAt: Date
     var updatedAt: Date
     var dueDate: Date?
@@ -167,6 +180,7 @@ struct TaskItem: Identifiable, Codable, Sendable, Equatable {
         scope: TaskScope = .global,
         parentID: UUID? = nil,
         categoryID: UUID? = nil,
+        progress: Int = 0,
         createdAt: Date = .now,
         updatedAt: Date = .now,
         dueDate: Date? = nil
@@ -179,6 +193,7 @@ struct TaskItem: Identifiable, Codable, Sendable, Equatable {
         self.scope = scope
         self.parentID = parentID
         self.categoryID = categoryID
+        self.progress = min(max(progress, 0), 100)
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.dueDate = dueDate

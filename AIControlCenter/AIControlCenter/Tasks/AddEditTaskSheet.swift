@@ -14,6 +14,7 @@ struct AddEditTaskSheet: View {
     @State private var selectedScope: TaskScope = .global
     @State private var selectedParentID: UUID? = nil
     @State private var selectedCategoryID: UUID? = nil
+    @State private var progress: Double = 0
     @State private var isCreatingCategory: Bool = false
     @State private var newCategoryName: String = ""
     @State private var newCategoryColorHex: String = TaskCategory.presetColors[0]
@@ -64,14 +65,22 @@ struct AddEditTaskSheet: View {
                         .pickerStyle(.segmented)
                     }
 
-                    if isEditing {
-                        field("Status") {
-                            Picker("Status", selection: $status) {
-                                ForEach(TaskStatus.allCases, id: \.self) {
-                                    Text($0.displayName).tag($0)
-                                }
+                    field("Status") {
+                        Picker("Status", selection: $status) {
+                            ForEach(TaskStatus.allCases, id: \.self) { s in
+                                Label(s.displayName, systemImage: s.iconName).tag(s)
                             }
-                            .pickerStyle(.segmented)
+                        }
+                        .labelsHidden()
+                    }
+
+                    field("Progress — \(Int(progress))%") {
+                        HStack(spacing: 8) {
+                            Slider(value: $progress, in: 0...100, step: 5)
+                                .tint(status.color)
+                            Text("\(Int(progress))%")
+                                .font(.callout.monospacedDigit())
+                                .frame(width: 40, alignment: .trailing)
                         }
                     }
 
@@ -239,6 +248,7 @@ struct AddEditTaskSheet: View {
             selectedParentID = task.parentID
             selectedScope = task.scope
             selectedCategoryID = task.categoryID
+            progress = Double(task.progress)
         } else {
             selectedScope = defaultScope ?? .global
         }
@@ -256,6 +266,7 @@ struct AddEditTaskSheet: View {
             task.scope = selectedScope
             task.parentID = selectedParentID
             task.categoryID = selectedCategoryID
+            task.progress = Int(progress)
             taskStore.updateTask(task)
         } else {
             taskStore.addTask(TaskItem(
@@ -264,7 +275,8 @@ struct AddEditTaskSheet: View {
                 priority: priority,
                 scope: selectedScope,
                 parentID: selectedParentID,
-                categoryID: selectedCategoryID
+                categoryID: selectedCategoryID,
+                progress: Int(progress)
             ))
         }
         dismiss()

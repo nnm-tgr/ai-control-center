@@ -92,11 +92,6 @@ struct TaskSummaryView: View {
     // MARK: - Helpers
 
     private func segmentColor(for task: TaskItem) -> Color {
-        switch task.status {
-        case .done:       .green
-        case .inProgress: .yellow
-        case .todo:       Color.secondary.opacity(0.25)
-        case .cancelled:  Color.secondary.opacity(0.1)
-        }
+        task.status.color.opacity(task.status == .todo ? 0.25 : 0.85)
     }
 }

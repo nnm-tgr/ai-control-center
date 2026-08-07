@@ -29,7 +29,18 @@ func check(_ condition: Bool, _ message: String, file: String = #file, line: Int
 // ── Inline model definitions mirroring TaskItem.swift ─────────────────────
 
 enum TaskStatus: String, Codable, CaseIterable {
-    case todo, inProgress, done, cancelled
+    case todo, inProgress, inReview, onHold, done
+
+    var displayName: String {
+        switch self {
+        case .todo:       "To Do"
+        case .inProgress: "In Progress"
+        case .inReview:   "In Review"
+        case .onHold:     "On Hold"
+        case .done:       "Done"
+        }
+    }
+
     var isDone: Bool { self == .done }
 }
 
@@ -120,6 +131,7 @@ struct TaskItem: Identifiable, Codable, Equatable {
     var scope: TaskScope
     var parentID: UUID?
     var categoryID: UUID?
+    var progress: Int
     var createdAt: Date
     var updatedAt: Date
     var dueDate: Date?
@@ -131,11 +143,13 @@ struct TaskItem: Identifiable, Codable, Equatable {
         id: UUID = UUID(), title: String, notes: String = "",
         status: TaskStatus = .todo, priority: TaskPriority = .medium,
         scope: TaskScope = .global, parentID: UUID? = nil, categoryID: UUID? = nil,
+        progress: Int = 0,
         createdAt: Date = .now, updatedAt: Date = .now, dueDate: Date? = nil
     ) {
         self.id = id; self.title = title; self.notes = notes
         self.status = status; self.priority = priority; self.scope = scope
         self.parentID = parentID; self.categoryID = categoryID
+        self.progress = min(max(progress, 0), 100)
         self.createdAt = createdAt; self.updatedAt = updatedAt; self.dueDate = dueDate
     }
 }
@@ -372,9 +386,85 @@ check(deletionTasks.first?.title == "Unrelated", "correct task survives")
 try? fm.removeItem(at: tmpDir)
 
 // ──────────────────────────────────────────
-// Test 9: TaskCategory Codable round-trip
+// Test 9: TaskStatus — 5 values, displayNames, isDone
 // ──────────────────────────────────────────
-print("\n=== Test 9: TaskCategory Codable round-trip ===")
+print("\n=== Test 9: TaskStatus values and properties ===")
+
+check(TaskStatus.allCases.count == 5, "5 statuses defined")
+check(TaskStatus.done.isDone, "done.isDone == true")
+check(!TaskStatus.inProgress.isDone, "inProgress.isDone == false")
+check(!TaskStatus.inReview.isDone, "inReview.isDone == false")
+check(!TaskStatus.onHold.isDone, "onHold.isDone == false")
+check(!TaskStatus.todo.isDone, "todo.isDone == false")
+
+let expectedNames: [TaskStatus: String] = [
+    .todo: "To Do", .inProgress: "In Progress",
+    .inReview: "In Review", .onHold: "On Hold", .done: "Done"
+]
+for (status, name) in expectedNames {
+    check(status.displayName == name, "\(status.rawValue).displayName == \"\(name)\"")
+}
+
+// Codable round-trip for all statuses
+for status in TaskStatus.allCases {
+    if let data = try? JSONEncoder().encode(status),
+       let decoded = try? JSONDecoder().decode(TaskStatus.self, from: data) {
+        check(decoded == status, "\(status.rawValue) Codable round-trip")
+    } else {
+        check(false, "\(status.rawValue) Codable failed")
+    }
+}
+
+// ──────────────────────────────────────────
+// Test 10: progress field — clamping and Codable
+// ──────────────────────────────────────────
+print("\n=== Test 10: progress field ===")
+
+let t0 = TaskItem(title: "Default", progress: 0)
+check(t0.progress == 0, "default progress = 0")
+
+let t50 = TaskItem(title: "Half", progress: 50)
+check(t50.progress == 50, "progress = 50 stored correctly")
+
+let tOver = TaskItem(title: "Over 100", progress: 150)
+check(tOver.progress == 100, "progress clamped to 100 (got \(tOver.progress))")
+
+let tUnder = TaskItem(title: "Under 0", progress: -10)
+check(tUnder.progress == 0, "progress clamped to 0 (got \(tUnder.progress))")
+
+do {
+    let data = try JSONEncoder().encode(t50)
+    let decoded = try JSONDecoder().decode(TaskItem.self, from: data)
+    check(decoded.progress == 50, "progress 50 preserved after Codable round-trip")
+} catch {
+    check(false, "progress Codable failed: \(error)")
+}
+
+// setStatus → done auto-sets progress=100
+var setStatusTasks: [TaskItem] = [TaskItem(title: "Task", progress: 40)]
+let taskID = setStatusTasks[0].id
+// Simulate setStatus(.done)
+if let idx = setStatusTasks.firstIndex(where: { $0.id == taskID }) {
+    setStatusTasks[idx].status = .done
+    if setStatusTasks[idx].status == .done { setStatusTasks[idx].progress = 100 }
+}
+check(setStatusTasks[0].progress == 100, "setStatus(.done) auto-sets progress to 100")
+
+// setProgress clamps
+func setProgress(id: UUID, progress: Int, in tasks: inout [TaskItem]) {
+    guard let idx = tasks.firstIndex(where: { $0.id == id }) else { return }
+    tasks[idx].progress = min(max(progress, 0), 100)
+}
+var progressTasks = [TaskItem(title: "T", progress: 30)]
+setProgress(id: progressTasks[0].id, progress: 75, in: &progressTasks)
+check(progressTasks[0].progress == 75, "setProgress(75) applied")
+setProgress(id: progressTasks[0].id, progress: 120, in: &progressTasks)
+check(progressTasks[0].progress == 100, "setProgress(120) clamped to 100")
+
+// ──────────────────────────────────────────
+// Test 11: TaskCategory Codable round-trip
+// ──────────────────────────────────────────
+print("\n=== Test 11: TaskCategory Codable round-trip ===")
 
 let cat1 = TaskCategory(id: UUID(), name: "Bug", colorHex: "#E85151", createdAt: .now)
 do {
@@ -392,9 +482,9 @@ check(TaskCategory.presetColors.allSatisfy { $0.hasPrefix("#") && $0.count == 7 
       "all preset colors are valid 7-char hex strings")
 
 // ──────────────────────────────────────────
-// Test 10: categoryID persisted in TaskItem
+// Test 12: categoryID persisted in TaskItem
 // ──────────────────────────────────────────
-print("\n=== Test 10: categoryID preserved in TaskItem Codable ===")
+print("\n=== Test 12: categoryID preserved in TaskItem Codable ===")
 
 let catID = UUID()
 let taskWithCat = TaskItem(title: "Categorized task", categoryID: catID)
@@ -416,9 +506,9 @@ do {
 }
 
 // ──────────────────────────────────────────
-// Test 11: Category deletion clears categoryID on tasks
+// Test 13: Category deletion clears categoryID on tasks
 // ──────────────────────────────────────────
-print("\n=== Test 11: Category deletion migrates tasks ===")
+print("\n=== Test 13: Category deletion migrates tasks ===")
 
 let catToDelete = UUID()
 var catTasks: [TaskItem] = [
@@ -445,9 +535,9 @@ check(catTasks.first(where: { $0.title == "Task other cat" })?.categoryID != nil
       "other category's tasks unaffected")
 
 // ──────────────────────────────────────────
-// Test 12: Category persistence to JSON
+// Test 14: Category persistence to JSON
 // ──────────────────────────────────────────
-print("\n=== Test 12: Category JSON persistence ===")
+print("\n=== Test 14: Category JSON persistence ===")
 
 let tmpDir2 = fm.temporaryDirectory.appendingPathComponent("cat_test_\(UUID().uuidString)")
 try? fm.createDirectory(at: tmpDir2, withIntermediateDirectories: true)
