@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - TaskStatus
 
-enum TaskStatus: String, Codable, CaseIterable, Sendable {
+enum TaskStatus: String, CaseIterable, Sendable {
     case todo
     case inProgress
     case inReview
@@ -31,6 +31,14 @@ enum TaskStatus: String, Codable, CaseIterable, Sendable {
 
     var isDone: Bool { self == .done }
     var isActive: Bool { self == .inProgress || self == .inReview }
+}
+
+extension TaskStatus: Codable {
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        // Unknown values (e.g. "cancelled" from older builds) fall back to .todo
+        self = TaskStatus(rawValue: raw) ?? .todo
+    }
 }
 
 // MARK: - TaskPriority
@@ -201,4 +209,23 @@ struct TaskItem: Identifiable, Codable, Sendable, Equatable {
 
     var isSubtask: Bool { parentID != nil }
     var isDone: Bool { status.isDone }
+
+    // Custom decoder: allows loading data saved before the `progress` field existed
+    // and before TaskStatus gained `inReview`/`onHold` (old `cancelled` maps to `.todo`).
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id         = try  c.decode(UUID.self,        forKey: .id)
+        title      = try  c.decode(String.self,      forKey: .title)
+        notes      = try (c.decodeIfPresent(String.self,      forKey: .notes)      ?? "")
+        status     = try (c.decodeIfPresent(TaskStatus.self,  forKey: .status)     ?? .todo)
+        priority   = try (c.decodeIfPresent(TaskPriority.self,forKey: .priority)   ?? .medium)
+        scope      = try  c.decode(TaskScope.self,   forKey: .scope)
+        parentID   = try  c.decodeIfPresent(UUID.self,        forKey: .parentID)
+        categoryID = try  c.decodeIfPresent(UUID.self,        forKey: .categoryID)
+        let raw    = try  c.decodeIfPresent(Int.self,         forKey: .progress)   ?? 0
+        progress   = min(max(raw, 0), 100)
+        createdAt  = try  c.decode(Date.self,        forKey: .createdAt)
+        updatedAt  = try (c.decodeIfPresent(Date.self,        forKey: .updatedAt)  ?? .now)
+        dueDate    = try  c.decodeIfPresent(Date.self,        forKey: .dueDate)
+    }
 }
