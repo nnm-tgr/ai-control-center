@@ -22,6 +22,10 @@ struct SettingsView: View {
             TerminalSettingsView()
                 .tabItem { Label("Terminal", systemImage: "terminal") }
                 .tag(3)
+
+            TaskCategorySettingsView()
+                .tabItem { Label("Tasks", systemImage: "checklist") }
+                .tag(4)
         }
         .frame(width: 520)
         .fixedSize()
@@ -242,6 +246,154 @@ private struct TerminalSettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
+    }
+}
+
+// MARK: - Task Categories
+
+private struct TaskCategorySettingsView: View {
+    @Environment(AppState.self) private var appState
+    @State private var editingID: UUID? = nil
+    @State private var editingName: String = ""
+    @State private var isAdding: Bool = false
+    @State private var newName: String = ""
+    @State private var newColorHex: String = TaskCategory.presetColors[0]
+
+    private var taskStore: TaskStore { appState.taskStore }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Task Categories")
+                .font(.headline)
+
+            List {
+                ForEach(taskStore.categories) { category in
+                    categoryRow(category)
+                }
+                .onDelete { offsets in
+                    offsets.map { taskStore.categories[$0].id }
+                        .forEach { taskStore.deleteCategory(id: $0) }
+                }
+
+                if isAdding {
+                    addRow
+                }
+            }
+            .frame(minHeight: 180)
+            .overlay {
+                if taskStore.categories.isEmpty && !isAdding {
+                    ContentUnavailableView(
+                        "No categories",
+                        systemImage: "tag",
+                        description: Text("Click + to add a category.")
+                    )
+                }
+            }
+
+            HStack {
+                Button {
+                    isAdding = true
+                    newName = ""
+                    newColorHex = TaskCategory.presetColors[0]
+                } label: {
+                    Label("Add", systemImage: "plus")
+                }
+                .disabled(isAdding)
+
+                Button {
+                    guard let id = editingID ?? taskStore.categories.first?.id else { return }
+                    taskStore.deleteCategory(id: id)
+                    editingID = nil
+                } label: {
+                    Label("Remove", systemImage: "minus")
+                }
+                .disabled(taskStore.categories.isEmpty)
+
+                Spacer()
+            }
+            .buttonStyle(.bordered)
+
+            Text("Categories are labels you can assign to any task to group them semantically.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding()
+    }
+
+    private func categoryRow(_ category: TaskCategory) -> some View {
+        HStack(spacing: 8) {
+            Circle()
+                .fill(Color(hex: category.colorHex))
+                .frame(width: 10, height: 10)
+
+            if editingID == category.id {
+                TextField("Name", text: $editingName)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { commitEdit(category) }
+                Button("Done") { commitEdit(category) }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+            } else {
+                Text(category.name)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .onTapGesture {
+                        editingID = category.id
+                        editingName = category.name
+                    }
+            }
+        }
+        .tag(category.id)
+    }
+
+    private var addRow: some View {
+        HStack(spacing: 8) {
+            colorSwatches(selection: $newColorHex)
+
+            TextField("Category name", text: $newName)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { commitAdd() }
+
+            Button("Add") { commitAdd() }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(newName.trimmingCharacters(in: .whitespaces).isEmpty)
+
+            Button("Cancel") { isAdding = false }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func colorSwatches(selection: Binding<String>) -> some View {
+        HStack(spacing: 4) {
+            ForEach(TaskCategory.presetColors, id: \.self) { hex in
+                Circle()
+                    .fill(Color(hex: hex))
+                    .frame(width: 14, height: 14)
+                    .overlay(
+                        Circle()
+                            .strokeBorder(.white.opacity(0.9), lineWidth: 2)
+                            .opacity(selection.wrappedValue == hex ? 1 : 0)
+                    )
+                    .onTapGesture { selection.wrappedValue = hex }
+            }
+        }
+    }
+
+    private func commitAdd() {
+        let name = newName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        taskStore.addCategory(TaskCategory(name: name, colorHex: newColorHex))
+        isAdding = false
+    }
+
+    private func commitEdit(_ original: TaskCategory) {
+        let name = editingName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { editingID = nil; return }
+        var updated = original
+        updated.name = name
+        taskStore.updateCategory(updated)
+        editingID = nil
     }
 }
 

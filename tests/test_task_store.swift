@@ -99,6 +99,18 @@ struct TaskGroup: Identifiable, Codable, Equatable {
     var createdAt: Date
 }
 
+struct TaskCategory: Identifiable, Codable, Equatable, Hashable {
+    let id: UUID
+    var name: String
+    var colorHex: String
+    var createdAt: Date
+
+    static let presetColors: [String] = [
+        "#5B5FC7", "#4A90D9", "#2ECC7A", "#F5C842",
+        "#F5813D", "#E85151", "#9B72CF", "#888888",
+    ]
+}
+
 struct TaskItem: Identifiable, Codable, Equatable {
     let id: UUID
     var title: String
@@ -107,6 +119,7 @@ struct TaskItem: Identifiable, Codable, Equatable {
     var priority: TaskPriority
     var scope: TaskScope
     var parentID: UUID?
+    var categoryID: UUID?
     var createdAt: Date
     var updatedAt: Date
     var dueDate: Date?
@@ -117,13 +130,13 @@ struct TaskItem: Identifiable, Codable, Equatable {
     init(
         id: UUID = UUID(), title: String, notes: String = "",
         status: TaskStatus = .todo, priority: TaskPriority = .medium,
-        scope: TaskScope = .global, parentID: UUID? = nil,
+        scope: TaskScope = .global, parentID: UUID? = nil, categoryID: UUID? = nil,
         createdAt: Date = .now, updatedAt: Date = .now, dueDate: Date? = nil
     ) {
         self.id = id; self.title = title; self.notes = notes
         self.status = status; self.priority = priority; self.scope = scope
-        self.parentID = parentID; self.createdAt = createdAt; self.updatedAt = updatedAt
-        self.dueDate = dueDate
+        self.parentID = parentID; self.categoryID = categoryID
+        self.createdAt = createdAt; self.updatedAt = updatedAt; self.dueDate = dueDate
     }
 }
 
@@ -357,6 +370,109 @@ check(deletionTasks.first?.title == "Unrelated", "correct task survives")
 
 // Cleanup
 try? fm.removeItem(at: tmpDir)
+
+// ──────────────────────────────────────────
+// Test 9: TaskCategory Codable round-trip
+// ──────────────────────────────────────────
+print("\n=== Test 9: TaskCategory Codable round-trip ===")
+
+let cat1 = TaskCategory(id: UUID(), name: "Bug", colorHex: "#E85151", createdAt: .now)
+do {
+    let data = try JSONEncoder().encode(cat1)
+    let decoded = try JSONDecoder().decode(TaskCategory.self, from: data)
+    check(decoded.id == cat1.id, "category id preserved")
+    check(decoded.name == cat1.name, "category name preserved")
+    check(decoded.colorHex == cat1.colorHex, "category colorHex preserved")
+} catch {
+    check(false, "TaskCategory Codable failed: \(error)")
+}
+
+check(TaskCategory.presetColors.count == 8, "8 preset colors defined")
+check(TaskCategory.presetColors.allSatisfy { $0.hasPrefix("#") && $0.count == 7 },
+      "all preset colors are valid 7-char hex strings")
+
+// ──────────────────────────────────────────
+// Test 10: categoryID persisted in TaskItem
+// ──────────────────────────────────────────
+print("\n=== Test 10: categoryID preserved in TaskItem Codable ===")
+
+let catID = UUID()
+let taskWithCat = TaskItem(title: "Categorized task", categoryID: catID)
+do {
+    let data = try JSONEncoder().encode(taskWithCat)
+    let decoded = try JSONDecoder().decode(TaskItem.self, from: data)
+    check(decoded.categoryID == catID, "categoryID preserved after round-trip")
+} catch {
+    check(false, "TaskItem with categoryID failed: \(error)")
+}
+
+let taskNoCat = TaskItem(title: "No category")
+do {
+    let data = try JSONEncoder().encode(taskNoCat)
+    let decoded = try JSONDecoder().decode(TaskItem.self, from: data)
+    check(decoded.categoryID == nil, "nil categoryID preserved")
+} catch {
+    check(false, "TaskItem with nil categoryID failed: \(error)")
+}
+
+// ──────────────────────────────────────────
+// Test 11: Category deletion clears categoryID on tasks
+// ──────────────────────────────────────────
+print("\n=== Test 11: Category deletion migrates tasks ===")
+
+let catToDelete = UUID()
+var catTasks: [TaskItem] = [
+    TaskItem(title: "Task with cat A", categoryID: catToDelete),
+    TaskItem(title: "Task with cat A (2)", categoryID: catToDelete),
+    TaskItem(title: "Task no cat"),
+    TaskItem(title: "Task other cat", categoryID: UUID()),
+]
+var catList: [TaskCategory] = [
+    TaskCategory(id: catToDelete, name: "Feature", colorHex: "#4A90D9", createdAt: .now),
+    TaskCategory(id: UUID(), name: "Bug", colorHex: "#E85151", createdAt: .now),
+]
+
+// Simulate deleteCategory
+for i in catTasks.indices where catTasks[i].categoryID == catToDelete {
+    catTasks[i].categoryID = nil
+}
+catList.removeAll { $0.id == catToDelete }
+
+check(catList.count == 1, "category removed from list (got \(catList.count))")
+check(catTasks.filter { $0.categoryID == catToDelete }.isEmpty, "no tasks remain with deleted category")
+check(catTasks.filter { $0.categoryID == nil }.count == 3, "3 tasks now have nil categoryID")
+check(catTasks.first(where: { $0.title == "Task other cat" })?.categoryID != nil,
+      "other category's tasks unaffected")
+
+// ──────────────────────────────────────────
+// Test 12: Category persistence to JSON
+// ──────────────────────────────────────────
+print("\n=== Test 12: Category JSON persistence ===")
+
+let tmpDir2 = fm.temporaryDirectory.appendingPathComponent("cat_test_\(UUID().uuidString)")
+try? fm.createDirectory(at: tmpDir2, withIntermediateDirectories: true)
+let catURL = tmpDir2.appendingPathComponent("task-categories.json")
+
+let catsToSave: [TaskCategory] = [
+    TaskCategory(id: UUID(), name: "Feature", colorHex: "#5B5FC7", createdAt: .now),
+    TaskCategory(id: UUID(), name: "Bug",     colorHex: "#E85151", createdAt: .now),
+    TaskCategory(id: UUID(), name: "Chore",   colorHex: "#888888", createdAt: .now),
+]
+
+do {
+    let data = try JSONEncoder().encode(catsToSave)
+    try data.write(to: catURL, options: .atomic)
+    check(fm.fileExists(atPath: catURL.path), "task-categories.json written")
+
+    let reloaded = try JSONDecoder().decode([TaskCategory].self, from: Data(contentsOf: catURL))
+    check(reloaded.count == 3, "count matches after reload")
+    check(reloaded.map(\.name).sorted() == catsToSave.map(\.name).sorted(), "names match")
+    check(reloaded.map(\.colorHex).sorted() == catsToSave.map(\.colorHex).sorted(), "colorHex matches")
+} catch {
+    check(false, "category persistence failed: \(error)")
+}
+
+try? fm.removeItem(at: tmpDir2)
 
 // ──────────────────────────────────────────
 // Summary

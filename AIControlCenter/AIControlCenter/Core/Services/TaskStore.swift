@@ -6,6 +6,7 @@ import Observation
 final class TaskStore {
     private(set) var tasks: [TaskItem] = []
     private(set) var taskGroups: [TaskGroup] = []
+    private(set) var categories: [TaskCategory] = []
 
     init() { load() }
 
@@ -19,8 +20,9 @@ final class TaskStore {
         return dir
     }()
 
-    private static var tasksURL:  URL? { storeDirectory?.appendingPathComponent("tasks.json") }
-    private static var groupsURL: URL? { storeDirectory?.appendingPathComponent("task-groups.json") }
+    private static var tasksURL:      URL? { storeDirectory?.appendingPathComponent("tasks.json") }
+    private static var groupsURL:     URL? { storeDirectory?.appendingPathComponent("task-groups.json") }
+    private static var categoriesURL: URL? { storeDirectory?.appendingPathComponent("task-categories.json") }
 
     private func load() {
         if let url = Self.tasksURL,
@@ -33,6 +35,11 @@ final class TaskStore {
            let decoded = try? JSONDecoder().decode([TaskGroup].self, from: data) {
             taskGroups = decoded
         }
+        if let url = Self.categoriesURL,
+           let data = try? Data(contentsOf: url),
+           let decoded = try? JSONDecoder().decode([TaskCategory].self, from: data) {
+            categories = decoded
+        }
     }
 
     private func saveTasks() {
@@ -44,6 +51,12 @@ final class TaskStore {
     private func saveGroups() {
         guard let url = Self.groupsURL,
               let data = try? JSONEncoder().encode(taskGroups) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private func saveCategories() {
+        guard let url = Self.categoriesURL,
+              let data = try? JSONEncoder().encode(categories) else { return }
         try? data.write(to: url, options: .atomic)
     }
 
@@ -125,5 +138,31 @@ final class TaskStore {
 
     func taskGroup(id: UUID) -> TaskGroup? {
         taskGroups.first { $0.id == id }
+    }
+
+    // MARK: - Category CRUD
+
+    func addCategory(_ category: TaskCategory) {
+        categories.append(category)
+        saveCategories()
+    }
+
+    func updateCategory(_ category: TaskCategory) {
+        guard let idx = categories.firstIndex(where: { $0.id == category.id }) else { return }
+        categories[idx] = category
+        saveCategories()
+    }
+
+    func deleteCategory(id: UUID) {
+        for i in tasks.indices where tasks[i].categoryID == id {
+            tasks[i].categoryID = nil
+        }
+        categories.removeAll { $0.id == id }
+        saveCategories()
+        saveTasks()
+    }
+
+    func category(id: UUID) -> TaskCategory? {
+        categories.first { $0.id == id }
     }
 }

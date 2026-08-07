@@ -7,6 +7,10 @@ struct TaskRowView: View {
     let taskStore: TaskStore
     let onEdit: (TaskItem) -> Void
 
+    private var category: TaskCategory? {
+        task.categoryID.flatMap { taskStore.category(id: $0) }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             rowContent(task, isSubtask: false)
@@ -54,6 +58,9 @@ struct TaskRowView: View {
                 if !isSubtask {
                     HStack(spacing: 4) {
                         scopeBadge(item.scope)
+                        if let cat = category {
+                            badge(cat.name, color: Color(hex: cat.colorHex))
+                        }
                         if item.priority != .medium {
                             badge(item.priority.displayName, color: item.priority.color)
                         }

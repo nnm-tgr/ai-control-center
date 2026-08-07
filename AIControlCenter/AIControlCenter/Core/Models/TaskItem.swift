@@ -122,6 +122,27 @@ struct TaskGroup: Identifiable, Codable, Sendable, Equatable {
     }
 }
 
+// MARK: - TaskCategory
+
+struct TaskCategory: Identifiable, Codable, Sendable, Equatable, Hashable {
+    let id: UUID
+    var name: String
+    var colorHex: String
+    var createdAt: Date
+
+    init(id: UUID = UUID(), name: String, colorHex: String = "#5B5FC7", createdAt: Date = .now) {
+        self.id = id
+        self.name = name
+        self.colorHex = colorHex
+        self.createdAt = createdAt
+    }
+
+    static let presetColors: [String] = [
+        "#5B5FC7", "#4A90D9", "#2ECC7A", "#F5C842",
+        "#F5813D", "#E85151", "#9B72CF", "#888888",
+    ]
+}
+
 // MARK: - TaskItem
 
 struct TaskItem: Identifiable, Codable, Sendable, Equatable {
@@ -132,6 +153,7 @@ struct TaskItem: Identifiable, Codable, Sendable, Equatable {
     var priority: TaskPriority
     var scope: TaskScope
     var parentID: UUID?
+    var categoryID: UUID?
     var createdAt: Date
     var updatedAt: Date
     var dueDate: Date?
@@ -144,6 +166,7 @@ struct TaskItem: Identifiable, Codable, Sendable, Equatable {
         priority: TaskPriority = .medium,
         scope: TaskScope = .global,
         parentID: UUID? = nil,
+        categoryID: UUID? = nil,
         createdAt: Date = .now,
         updatedAt: Date = .now,
         dueDate: Date? = nil
@@ -155,6 +178,7 @@ struct TaskItem: Identifiable, Codable, Sendable, Equatable {
         self.priority = priority
         self.scope = scope
         self.parentID = parentID
+        self.categoryID = categoryID
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.dueDate = dueDate

@@ -4,7 +4,6 @@ struct AddEditTaskSheet: View {
     @Environment(AppState.self) private var appState
     @Environment(\.dismiss) private var dismiss
 
-    // nil = add mode; non-nil = edit mode
     var editingTask: TaskItem?
     var defaultScope: TaskScope?
 
@@ -14,6 +13,10 @@ struct AddEditTaskSheet: View {
     @State private var priority: TaskPriority = .medium
     @State private var selectedScope: TaskScope = .global
     @State private var selectedParentID: UUID? = nil
+    @State private var selectedCategoryID: UUID? = nil
+    @State private var isCreatingCategory: Bool = false
+    @State private var newCategoryName: String = ""
+    @State private var newCategoryColorHex: String = TaskCategory.presetColors[0]
 
     private var taskStore: TaskStore { appState.taskStore }
     private var isEditing: Bool { editingTask != nil }
@@ -37,14 +40,12 @@ struct AddEditTaskSheet: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        label("Title")
+                    field("Title") {
                         TextField("Task title", text: $title)
                             .textFieldStyle(.roundedBorder)
                     }
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        label("Notes")
+                    field("Notes") {
                         TextEditor(text: $notes)
                             .font(.callout)
                             .frame(minHeight: 60)
@@ -54,8 +55,7 @@ struct AddEditTaskSheet: View {
                             )
                     }
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        label("Priority")
+                    field("Priority") {
                         Picker("Priority", selection: $priority) {
                             ForEach(TaskPriority.allCases, id: \.self) {
                                 Text($0.displayName).tag($0)
@@ -65,8 +65,7 @@ struct AddEditTaskSheet: View {
                     }
 
                     if isEditing {
-                        VStack(alignment: .leading, spacing: 6) {
-                            label("Status")
+                        field("Status") {
                             Picker("Status", selection: $status) {
                                 ForEach(TaskStatus.allCases, id: \.self) {
                                     Text($0.displayName).tag($0)
@@ -76,21 +75,30 @@ struct AddEditTaskSheet: View {
                         }
                     }
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        label("Scope")
-                        scopePicker
-                    }
+                    field("Scope") { scopePicker }
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        label("Parent Task (optional)")
-                        parentPicker
-                    }
+                    field("Category") { categorySection }
+
+                    field("Parent Task (optional)") { parentPicker }
                 }
                 .padding(16)
             }
         }
         .frame(width: 420)
         .onAppear { configure() }
+    }
+
+    // MARK: - Field wrapper
+
+    private func field<C: View>(_ title: String, @ViewBuilder content: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+                .textCase(.uppercase)
+            content()
+        }
     }
 
     // MARK: - Scope Picker
@@ -114,6 +122,88 @@ struct AddEditTaskSheet: View {
         .labelsHidden()
     }
 
+    // MARK: - Category Section
+
+    private var categorySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Existing categories
+            categoryPicker
+
+            // Inline new category form
+            if isCreatingCategory {
+                newCategoryForm
+            } else {
+                Button {
+                    isCreatingCategory = true
+                    newCategoryName = ""
+                    newCategoryColorHex = TaskCategory.presetColors[0]
+                } label: {
+                    Label("New Category…", systemImage: "plus")
+                        .font(.callout)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Color.accentColor)
+            }
+        }
+    }
+
+    private var categoryPicker: some View {
+        Picker("Category", selection: $selectedCategoryID) {
+            Text("None").tag(UUID?(nil))
+            if !taskStore.categories.isEmpty {
+                Divider()
+                ForEach(taskStore.categories) { cat in
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Color(hex: cat.colorHex))
+                            .frame(width: 8, height: 8)
+                        Text(cat.name)
+                    }
+                    .tag(Optional(cat.id))
+                }
+            }
+        }
+        .labelsHidden()
+    }
+
+    private var newCategoryForm: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TextField("Category name", text: $newCategoryName)
+                .textFieldStyle(.roundedBorder)
+
+            HStack(spacing: 6) {
+                ForEach(TaskCategory.presetColors, id: \.self) { hex in
+                    Circle()
+                        .fill(Color(hex: hex))
+                        .frame(width: 20, height: 20)
+                        .overlay(
+                            Circle()
+                                .strokeBorder(.white.opacity(0.8), lineWidth: 2)
+                                .opacity(newCategoryColorHex == hex ? 1 : 0)
+                        )
+                        .onTapGesture { newCategoryColorHex = hex }
+                }
+                Spacer()
+
+                Button("Cancel") {
+                    isCreatingCategory = false
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+
+                Button("Create") {
+                    createCategory()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .disabled(newCategoryName.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
     // MARK: - Parent Picker
 
     private var parentPicker: some View {
@@ -129,14 +219,15 @@ struct AddEditTaskSheet: View {
         .labelsHidden()
     }
 
-    // MARK: - Helpers
+    // MARK: - Actions
 
-    private func label(_ text: String) -> some View {
-        Text(text)
-            .font(.caption)
-            .fontWeight(.semibold)
-            .foregroundStyle(.secondary)
-            .textCase(.uppercase)
+    private func createCategory() {
+        let name = newCategoryName.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        let cat = TaskCategory(name: name, colorHex: newCategoryColorHex)
+        taskStore.addCategory(cat)
+        selectedCategoryID = cat.id
+        isCreatingCategory = false
     }
 
     private func configure() {
@@ -147,6 +238,7 @@ struct AddEditTaskSheet: View {
             priority = task.priority
             selectedParentID = task.parentID
             selectedScope = task.scope
+            selectedCategoryID = task.categoryID
         } else {
             selectedScope = defaultScope ?? .global
         }
@@ -163,6 +255,7 @@ struct AddEditTaskSheet: View {
             task.priority = priority
             task.scope = selectedScope
             task.parentID = selectedParentID
+            task.categoryID = selectedCategoryID
             taskStore.updateTask(task)
         } else {
             taskStore.addTask(TaskItem(
@@ -170,10 +263,25 @@ struct AddEditTaskSheet: View {
                 notes: notes,
                 priority: priority,
                 scope: selectedScope,
-                parentID: selectedParentID
+                parentID: selectedParentID,
+                categoryID: selectedCategoryID
             ))
         }
         dismiss()
+    }
+}
+
+// MARK: - Color from hex
+
+extension Color {
+    init(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        var int: UInt64 = 0
+        Scanner(string: hex).scanHexInt64(&int)
+        let r = Double((int >> 16) & 0xFF) / 255
+        let g = Double((int >> 8) & 0xFF) / 255
+        let b = Double(int & 0xFF) / 255
+        self.init(red: r, green: g, blue: b)
     }
 }
 
