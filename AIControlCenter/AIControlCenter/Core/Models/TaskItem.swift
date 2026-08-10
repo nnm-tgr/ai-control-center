@@ -41,6 +41,22 @@ extension TaskStatus: Codable {
     }
 }
 
+// MARK: - TaskNote
+
+struct TaskNote: Identifiable, Codable, Sendable, Equatable {
+    let id: UUID
+    var content: String
+    let createdAt: Date
+    var updatedAt: Date
+
+    init(id: UUID = UUID(), content: String, createdAt: Date = .now, updatedAt: Date = .now) {
+        self.id = id
+        self.content = content
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+}
+
 // MARK: - TaskPriority
 
 enum TaskPriority: String, Codable, CaseIterable, Comparable, Sendable {
@@ -168,7 +184,7 @@ struct TaskCategory: Identifiable, Codable, Sendable, Equatable, Hashable {
 struct TaskItem: Identifiable, Codable, Sendable, Equatable {
     let id: UUID
     var title: String
-    var notes: String
+    var notes: [TaskNote]
     var status: TaskStatus
     var priority: TaskPriority
     var scope: TaskScope
@@ -182,7 +198,7 @@ struct TaskItem: Identifiable, Codable, Sendable, Equatable {
     init(
         id: UUID = UUID(),
         title: String,
-        notes: String = "",
+        notes: [TaskNote] = [],
         status: TaskStatus = .todo,
         priority: TaskPriority = .medium,
         scope: TaskScope = .global,
@@ -210,22 +226,32 @@ struct TaskItem: Identifiable, Codable, Sendable, Equatable {
     var isSubtask: Bool { parentID != nil }
     var isDone: Bool { status.isDone }
 
-    // Custom decoder: allows loading data saved before the `progress` field existed
-    // and before TaskStatus gained `inReview`/`onHold` (old `cancelled` maps to `.todo`).
+    // Handles three cases for the `notes` key:
+    //   [TaskNote] array — current format
+    //   String          — legacy format; converted to a single note entry
+    //   absent          — newly created task; defaults to []
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        id         = try  c.decode(UUID.self,        forKey: .id)
-        title      = try  c.decode(String.self,      forKey: .title)
-        notes      = try (c.decodeIfPresent(String.self,      forKey: .notes)      ?? "")
-        status     = try (c.decodeIfPresent(TaskStatus.self,  forKey: .status)     ?? .todo)
-        priority   = try (c.decodeIfPresent(TaskPriority.self,forKey: .priority)   ?? .medium)
-        scope      = try  c.decode(TaskScope.self,   forKey: .scope)
-        parentID   = try  c.decodeIfPresent(UUID.self,        forKey: .parentID)
-        categoryID = try  c.decodeIfPresent(UUID.self,        forKey: .categoryID)
-        let raw    = try  c.decodeIfPresent(Int.self,         forKey: .progress)   ?? 0
+        id         = try  c.decode(UUID.self,         forKey: .id)
+        title      = try  c.decode(String.self,       forKey: .title)
+        status     = try (c.decodeIfPresent(TaskStatus.self,   forKey: .status)   ?? .todo)
+        priority   = try (c.decodeIfPresent(TaskPriority.self, forKey: .priority) ?? .medium)
+        scope      = try  c.decode(TaskScope.self,    forKey: .scope)
+        parentID   = try  c.decodeIfPresent(UUID.self,         forKey: .parentID)
+        categoryID = try  c.decodeIfPresent(UUID.self,         forKey: .categoryID)
+        let raw    = try  c.decodeIfPresent(Int.self,          forKey: .progress)  ?? 0
         progress   = min(max(raw, 0), 100)
-        createdAt  = try  c.decode(Date.self,        forKey: .createdAt)
-        updatedAt  = try (c.decodeIfPresent(Date.self,        forKey: .updatedAt)  ?? .now)
-        dueDate    = try  c.decodeIfPresent(Date.self,        forKey: .dueDate)
+        createdAt  = try  c.decode(Date.self,         forKey: .createdAt)
+        updatedAt  = try (c.decodeIfPresent(Date.self,         forKey: .updatedAt) ?? .now)
+        dueDate    = try  c.decodeIfPresent(Date.self,         forKey: .dueDate)
+
+        if let array = try? c.decode([TaskNote].self, forKey: .notes) {
+            notes = array
+        } else if let legacy = try? c.decode(String.self, forKey: .notes),
+                  !legacy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            notes = [TaskNote(content: legacy)]
+        } else {
+            notes = []
+        }
     }
 }

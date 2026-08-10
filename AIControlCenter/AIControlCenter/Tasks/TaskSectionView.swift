@@ -4,7 +4,9 @@ struct TaskSectionView: View {
     @Environment(AppState.self) private var appState
     let scopeFilter: TaskScopeFilter
     let onAddTask: (TaskScope?) -> Void
-    let onEditTask: (TaskItem) -> Void
+    let onSelectTask: (TaskItem) -> Void
+
+    @State private var collapsedTaskIDs: Set<UUID> = []
 
     private var taskStore: TaskStore { appState.taskStore }
 
@@ -71,7 +73,15 @@ struct TaskSectionView: View {
                 TaskRowView(
                     task: task,
                     taskStore: taskStore,
-                    onEdit: onEditTask
+                    isExpanded: !collapsedTaskIDs.contains(task.id),
+                    onToggleExpand: {
+                        if collapsedTaskIDs.contains(task.id) {
+                            collapsedTaskIDs.remove(task.id)
+                        } else {
+                            collapsedTaskIDs.insert(task.id)
+                        }
+                    },
+                    onSelect: onSelectTask
                 )
                 if task.id != lastID {
                     Divider().padding(.leading, 36)

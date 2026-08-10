@@ -65,6 +65,7 @@ final class TaskStore {
     func addTask(_ task: TaskItem) {
         tasks.append(task)
         saveTasks()
+        if let parentID = task.parentID { syncParent(id: parentID) }
     }
 
     func updateTask(_ task: TaskItem) {
@@ -73,17 +74,29 @@ final class TaskStore {
         updated.updatedAt = .now
         tasks[idx] = updated
         saveTasks()
+        if let parentID = task.parentID { syncParent(id: parentID) }
     }
 
     func deleteTask(id: UUID) {
+        let parentID = tasks.first(where: { $0.id == id })?.parentID
         tasks.removeAll { $0.id == id || $0.parentID == id }
         saveTasks()
+        if let parentID { syncParent(id: parentID) }
     }
 
     func toggleDone(id: UUID) {
         guard let idx = tasks.firstIndex(where: { $0.id == id }) else { return }
-        let next: TaskStatus = tasks[idx].isDone ? .todo : .done
-        setStatus(id: id, status: next)
+        let parentID = tasks[idx].parentID
+        if tasks[idx].isDone {
+            tasks[idx].status   = .todo
+            tasks[idx].progress = 0
+        } else {
+            tasks[idx].status   = .done
+            tasks[idx].progress = 100
+        }
+        tasks[idx].updatedAt = .now
+        saveTasks()
+        if let parentID { syncParent(id: parentID) }
     }
 
     func setStatus(id: UUID, status: TaskStatus) {
@@ -92,12 +105,64 @@ final class TaskStore {
         if status == .done { tasks[idx].progress = 100 }
         tasks[idx].updatedAt = .now
         saveTasks()
+        if let parentID = tasks[idx].parentID { syncParent(id: parentID) }
     }
 
     func setProgress(id: UUID, progress: Int) {
         guard let idx = tasks.firstIndex(where: { $0.id == id }) else { return }
         tasks[idx].progress = min(max(progress, 0), 100)
         tasks[idx].updatedAt = .now
+        saveTasks()
+        if let parentID = tasks[idx].parentID { syncParent(id: parentID) }
+    }
+
+    // MARK: - Parent sync
+
+    func hasChildren(id: UUID) -> Bool {
+        tasks.contains(where: { $0.parentID == id })
+    }
+
+    // Derives progress and status of a parent from its current children.
+    // Called after any child mutation. No-op when children list is empty.
+    private func syncParent(id: UUID) {
+        let children = tasks.filter { $0.parentID == id }
+        guard !children.isEmpty,
+              let idx = tasks.firstIndex(where: { $0.id == id })
+        else { return }
+
+        let avg = children.map(\.progress).reduce(0, +) / children.count
+
+        tasks[idx].progress = avg
+        tasks[idx].status   = avg == 100 ? .done       :
+                              avg >  0   ? .inProgress :
+                                           .todo
+        tasks[idx].updatedAt = .now
+        saveTasks()
+    }
+
+    // MARK: - Note CRUD
+
+    func addNote(to taskID: UUID, content: String) {
+        guard let idx = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        tasks[idx].notes.append(TaskNote(content: content))
+        tasks[idx].updatedAt = .now
+        saveTasks()
+    }
+
+    func updateNote(taskID: UUID, noteID: UUID, content: String) {
+        guard let taskIdx = tasks.firstIndex(where: { $0.id == taskID }),
+              let noteIdx = tasks[taskIdx].notes.firstIndex(where: { $0.id == noteID })
+        else { return }
+        tasks[taskIdx].notes[noteIdx].content = content
+        tasks[taskIdx].notes[noteIdx].updatedAt = .now
+        tasks[taskIdx].updatedAt = .now
+        saveTasks()
+    }
+
+    func deleteNote(taskID: UUID, noteID: UUID) {
+        guard let taskIdx = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        tasks[taskIdx].notes.removeAll { $0.id == noteID }
+        tasks[taskIdx].updatedAt = .now
         saveTasks()
     }
 

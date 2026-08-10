@@ -4,7 +4,7 @@ struct DashboardView: View {
     @Environment(AppState.self) private var appState
     @State private var viewModel = DashboardViewModel()
     @FocusState private var isSearchFocused: Bool
-    @State private var editingTask: TaskItem? = nil
+    @State private var selectedTaskID: UUID? = nil
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -43,7 +43,7 @@ struct DashboardView: View {
                         viewModel.addTaskDefaultScope = scope
                         viewModel.isAddTaskPresented = true
                     },
-                    onEditTask: { task in editingTask = task }
+                    onSelectTask: { task in selectedTaskID = task.id }
                 )
                 .environment(appState)
                 Divider()
@@ -59,10 +59,6 @@ struct DashboardView: View {
         }
         .sheet(isPresented: $viewModel.isAddTaskPresented) {
             AddEditTaskSheet(defaultScope: viewModel.addTaskDefaultScope)
-                .environment(appState)
-        }
-        .sheet(item: $editingTask) { task in
-            AddEditTaskSheet(editingTask: task)
                 .environment(appState)
         }
     }
@@ -297,13 +293,17 @@ struct DashboardView: View {
 
     @ViewBuilder
     private var detailContent: some View {
-        if let project = viewModel.selectedProject {
+        if let taskID = selectedTaskID,
+           appState.taskStore.tasks.contains(where: { $0.id == taskID }) {
+            TaskDetailView(taskID: taskID)
+                .environment(appState)
+        } else if let project = viewModel.selectedProject {
             AgentDetailView(project: project)
         } else {
             ContentUnavailableView(
-                "Select a Project",
+                "Select a Project or Task",
                 systemImage: "sidebar.right",
-                description: Text("Choose a project from the list to see details.")
+                description: Text("Choose a project from the list or tap a task to see details.")
             )
         }
     }

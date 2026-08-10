@@ -8,7 +8,6 @@ struct AddEditTaskSheet: View {
     var defaultScope: TaskScope?
 
     @State private var title: String = ""
-    @State private var notes: String = ""
     @State private var status: TaskStatus = .todo
     @State private var priority: TaskPriority = .medium
     @State private var selectedScope: TaskScope = .global
@@ -21,6 +20,10 @@ struct AddEditTaskSheet: View {
 
     private var taskStore: TaskStore { appState.taskStore }
     private var isEditing: Bool { editingTask != nil }
+    private var isParentTask: Bool {
+        guard let task = editingTask else { return false }
+        return taskStore.hasChildren(id: task.id)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -46,16 +49,6 @@ struct AddEditTaskSheet: View {
                             .textFieldStyle(.roundedBorder)
                     }
 
-                    field("Notes") {
-                        TextEditor(text: $notes)
-                            .font(.callout)
-                            .frame(minHeight: 60)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 5)
-                                    .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
-                            )
-                    }
-
                     field("Priority") {
                         Picker("Priority", selection: $priority) {
                             ForEach(TaskPriority.allCases, id: \.self) {
@@ -66,21 +59,29 @@ struct AddEditTaskSheet: View {
                     }
 
                     field("Status") {
-                        Picker("Status", selection: $status) {
-                            ForEach(TaskStatus.allCases, id: \.self) { s in
-                                Label(s.displayName, systemImage: s.iconName).tag(s)
+                        if isParentTask {
+                            derivedFromSubtasksNote
+                        } else {
+                            Picker("Status", selection: $status) {
+                                ForEach(TaskStatus.allCases, id: \.self) { s in
+                                    Label(s.displayName, systemImage: s.iconName).tag(s)
+                                }
                             }
+                            .labelsHidden()
                         }
-                        .labelsHidden()
                     }
 
                     field("Progress — \(Int(progress))%") {
-                        HStack(spacing: 8) {
-                            Slider(value: $progress, in: 0...100, step: 5)
-                                .tint(status.color)
-                            Text("\(Int(progress))%")
-                                .font(.callout.monospacedDigit())
-                                .frame(width: 40, alignment: .trailing)
+                        if isParentTask {
+                            EmptyView()
+                        } else {
+                            HStack(spacing: 8) {
+                                Slider(value: $progress, in: 0...100, step: 5)
+                                    .tint(status.color)
+                                Text("\(Int(progress))%")
+                                    .font(.callout.monospacedDigit())
+                                    .frame(width: 40, alignment: .trailing)
+                            }
                         }
                     }
 
@@ -95,6 +96,14 @@ struct AddEditTaskSheet: View {
         }
         .frame(width: 420)
         .onAppear { configure() }
+    }
+
+    // MARK: - Derived note
+
+    private var derivedFromSubtasksNote: some View {
+        Label("Derived from subtasks", systemImage: "arrow.triangle.merge")
+            .font(.callout)
+            .foregroundStyle(.secondary)
     }
 
     // MARK: - Field wrapper
@@ -242,7 +251,6 @@ struct AddEditTaskSheet: View {
     private func configure() {
         if let task = editingTask {
             title = task.title
-            notes = task.notes
             status = task.status
             priority = task.priority
             selectedParentID = task.parentID
@@ -260,7 +268,6 @@ struct AddEditTaskSheet: View {
 
         if var task = editingTask {
             task.title = trimmed
-            task.notes = notes
             task.status = status
             task.priority = priority
             task.scope = selectedScope
@@ -271,7 +278,6 @@ struct AddEditTaskSheet: View {
         } else {
             taskStore.addTask(TaskItem(
                 title: trimmed,
-                notes: notes,
                 priority: priority,
                 scope: selectedScope,
                 parentID: selectedParentID,

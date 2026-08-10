@@ -72,7 +72,7 @@ struct TaskSummaryView: View {
             TaskStatusIndicatorView(status: task.status, size: 14)
 
             Text(task.title)
-                .font(.callout)
+                .font(.body)
                 .foregroundStyle(task.isDone ? .tertiary : .secondary)
                 .strikethrough(task.isDone, color: Color.secondary)
                 .lineLimit(1)
@@ -81,7 +81,7 @@ struct TaskSummaryView: View {
 
             if task.priority == .high || task.priority == .urgent {
                 Text(task.priority.displayName)
-                    .font(.caption2)
+                    .font(.caption)
                     .fontWeight(.semibold)
                     .foregroundStyle(task.priority.color)
             }
