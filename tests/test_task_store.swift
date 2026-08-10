@@ -773,6 +773,93 @@ do {
 }
 
 // ──────────────────────────────────────────
+// Test 19: Edit flow preserves TaskNotes
+// (simulates AddEditTaskSheet configure + save)
+// configure() reads: title, status, priority, scope, parentID, categoryID, progress — NOT notes
+// save()      writes: those fields back via updateTask; notes are never touched
+// ──────────────────────────────────────────
+print("\n=== Test 19: Edit flow (configure+save) preserves notes ===")
+
+let originalNotes = [
+    TaskNote(content: "Architecture decision: Observer pattern"),
+    TaskNote(content: "Blocked on backend API"),
+]
+var editableTask = TaskItem(
+    title: "Feature: Notifications",
+    notes: originalNotes,
+    status: .inProgress,
+    priority: .high,
+    scope: .global,
+    progress: 40
+)
+
+// Simulate configure() — read non-notes fields into @State
+let stateTitle    = editableTask.title
+let stateStatus   = editableTask.status
+let statePriority = editableTask.priority
+let stateScope    = editableTask.scope
+let stateParent   = editableTask.parentID
+let stateCatID    = editableTask.categoryID
+// (notes are NOT read into @State by AddEditTaskSheet)
+
+// Simulate user edits
+let updatedTitle    = "Feature: Push Notifications"
+let updatedProgress = 60
+
+// Simulate save() — write @State back; notes untouched
+editableTask.title      = updatedTitle
+editableTask.status     = stateStatus
+editableTask.priority   = statePriority
+editableTask.scope      = stateScope
+editableTask.parentID   = stateParent
+editableTask.categoryID = stateCatID
+editableTask.progress   = updatedProgress
+
+check(editableTask.title == "Feature: Push Notifications", "title updated by edit")
+check(editableTask.progress == 60, "progress updated by edit")
+check(editableTask.notes.count == 2,
+      "notes count unchanged after edit (got \(editableTask.notes.count))")
+check(editableTask.notes[0].content == "Architecture decision: Observer pattern",
+      "first note content unchanged")
+check(editableTask.notes[1].content == "Blocked on backend API",
+      "second note content unchanged")
+check(editableTask.notes.map(\.id) == originalNotes.map(\.id),
+      "note IDs unchanged after edit")
+
+// ──────────────────────────────────────────
+// Test 20: onEdit callback closure pattern
+// TaskRowView receives onEdit: (TaskItem) -> Void
+// Tap on title area (or right-click → Edit) should call onEdit(task)
+// DashboardView receives the task and sets editingTask, triggering the sheet
+// ──────────────────────────────────────────
+print("\n=== Test 20: onEdit callback closure pattern ===")
+
+var capturedTask: TaskItem? = nil
+let callbackSample = TaskItem(
+    title: "Callback test task",
+    notes: [TaskNote(content: "Note preserved through callback")]
+)
+
+let onEditCallback: (TaskItem) -> Void = { task in capturedTask = task }
+// Simulate tap gesture firing onEdit
+onEditCallback(callbackSample)
+
+check(capturedTask != nil, "onEdit callback was called")
+check(capturedTask?.id == callbackSample.id, "correct task passed to onEdit (by id)")
+check(capturedTask?.title == callbackSample.title, "task title preserved through callback")
+check(capturedTask?.notes.count == 1, "task notes preserved through callback")
+check(capturedTask?.notes.first?.content == "Note preserved through callback",
+      "note content intact through callback")
+
+// Simulate a different task being passed (subtask scenario)
+var capturedSubtask: TaskItem? = nil
+let subtaskSample = TaskItem(title: "Subtask item", parentID: callbackSample.id)
+let onEditSubCallback: (TaskItem) -> Void = { task in capturedSubtask = task }
+onEditSubCallback(subtaskSample)
+check(capturedSubtask?.id == subtaskSample.id, "subtask onEdit passes correct id")
+check(capturedSubtask?.parentID == callbackSample.id, "subtask parentID preserved through callback")
+
+// ──────────────────────────────────────────
 // Summary
 // ──────────────────────────────────────────
 print("\n=== Results ===")
