@@ -5,6 +5,8 @@ import SwiftUI
 struct TaskRowView: View {
     let task: TaskItem
     let taskStore: TaskStore
+    let isExpanded: Bool
+    let onToggleExpand: () -> Void
     let onEdit: (TaskItem) -> Void
 
     @State private var showProgressPopover = false
@@ -15,16 +17,32 @@ struct TaskRowView: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            rootRow
-            subtaskRows
+        let children = taskStore.subtasks(of: task.id)
+        return VStack(spacing: 0) {
+            rootRow(hasChildren: !children.isEmpty)
+            if isExpanded && !children.isEmpty {
+                subtaskRows(children)
+            }
         }
     }
 
     // MARK: - Root row
 
-    private var rootRow: some View {
+    private func rootRow(hasChildren: Bool) -> some View {
         HStack(alignment: .center, spacing: 8) {
+            // Disclosure chevron (only for tasks with subtasks)
+            if hasChildren {
+                Button { onToggleExpand() } label: {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 10)
+                        .animation(.easeInOut(duration: 0.15), value: isExpanded)
+                }
+                .buttonStyle(.plain)
+            }
+
             // Checkbox (quick done toggle)
             Button { taskStore.toggleDone(id: task.id) } label: {
                 TaskStatusIndicatorView(status: task.status, size: 15)
@@ -157,9 +175,8 @@ struct TaskRowView: View {
 
     // MARK: - Subtask rows
 
-    private var subtaskRows: some View {
-        let children = taskStore.subtasks(of: task.id)
-        return ForEach(children) { child in
+    private func subtaskRows(_ children: [TaskItem]) -> some View {
+        ForEach(children) { child in
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     Rectangle()
