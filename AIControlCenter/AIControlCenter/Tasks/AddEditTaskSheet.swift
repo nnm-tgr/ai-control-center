@@ -20,6 +20,10 @@ struct AddEditTaskSheet: View {
 
     private var taskStore: TaskStore { appState.taskStore }
     private var isEditing: Bool { editingTask != nil }
+    private var isParentTask: Bool {
+        guard let task = editingTask else { return false }
+        return taskStore.hasChildren(id: task.id)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -55,21 +59,29 @@ struct AddEditTaskSheet: View {
                     }
 
                     field("Status") {
-                        Picker("Status", selection: $status) {
-                            ForEach(TaskStatus.allCases, id: \.self) { s in
-                                Label(s.displayName, systemImage: s.iconName).tag(s)
+                        if isParentTask {
+                            derivedFromSubtasksNote
+                        } else {
+                            Picker("Status", selection: $status) {
+                                ForEach(TaskStatus.allCases, id: \.self) { s in
+                                    Label(s.displayName, systemImage: s.iconName).tag(s)
+                                }
                             }
+                            .labelsHidden()
                         }
-                        .labelsHidden()
                     }
 
                     field("Progress — \(Int(progress))%") {
-                        HStack(spacing: 8) {
-                            Slider(value: $progress, in: 0...100, step: 5)
-                                .tint(status.color)
-                            Text("\(Int(progress))%")
-                                .font(.callout.monospacedDigit())
-                                .frame(width: 40, alignment: .trailing)
+                        if isParentTask {
+                            EmptyView()
+                        } else {
+                            HStack(spacing: 8) {
+                                Slider(value: $progress, in: 0...100, step: 5)
+                                    .tint(status.color)
+                                Text("\(Int(progress))%")
+                                    .font(.callout.monospacedDigit())
+                                    .frame(width: 40, alignment: .trailing)
+                            }
                         }
                     }
 
@@ -84,6 +96,14 @@ struct AddEditTaskSheet: View {
         }
         .frame(width: 420)
         .onAppear { configure() }
+    }
+
+    // MARK: - Derived note
+
+    private var derivedFromSubtasksNote: some View {
+        Label("Derived from subtasks", systemImage: "arrow.triangle.merge")
+            .font(.callout)
+            .foregroundStyle(.secondary)
     }
 
     // MARK: - Field wrapper
