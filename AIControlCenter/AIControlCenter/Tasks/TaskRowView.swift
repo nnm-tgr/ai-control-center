@@ -7,7 +7,7 @@ struct TaskRowView: View {
     let taskStore: TaskStore
     let isExpanded: Bool
     let onToggleExpand: () -> Void
-    let onEdit: (TaskItem) -> Void
+    let onSelect: (TaskItem) -> Void
 
     @State private var showProgressPopover = false
     @State private var draftProgress: Double = 0
@@ -30,47 +30,54 @@ struct TaskRowView: View {
 
     private func rootRow(hasChildren: Bool) -> some View {
         HStack(alignment: .center, spacing: 8) {
-            // Disclosure chevron (only for tasks with subtasks)
+            // Disclosure chevron — 16×24 hit area for reliable clicking
             if hasChildren {
                 Button { onToggleExpand() } label: {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.caption2)
                         .fontWeight(.semibold)
                         .foregroundStyle(.secondary)
-                        .frame(width: 10)
                         .animation(.easeInOut(duration: 0.15), value: isExpanded)
+                        .frame(width: 16, height: 24)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
 
-            // Checkbox (quick done toggle)
+            // Checkbox — 24×24 hit area prevents misses on the 15 pt indicator
             Button { taskStore.toggleDone(id: task.id) } label: {
                 TaskStatusIndicatorView(status: task.status, size: 15)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            // Title + badges — tap to open edit sheet
-            VStack(alignment: .leading, spacing: 3) {
-                Text(task.title)
-                    .font(.body)
-                    .foregroundStyle(task.isDone ? .tertiary : .primary)
-                    .strikethrough(task.isDone, color: Color.secondary)
-                    .lineLimit(1)
+            // Title + badges as a Button so it has a well-defined,
+            // non-overlapping hit area that doesn't compete with the checkbox.
+            // Spacer inside the label stretches the hit area to fill remaining width.
+            Button { onSelect(task) } label: {
+                HStack(alignment: .center, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(task.title)
+                            .font(.body)
+                            .foregroundStyle(task.isDone ? .tertiary : .primary)
+                            .strikethrough(task.isDone, color: Color.secondary)
+                            .lineLimit(1)
 
-                HStack(spacing: 4) {
-                    scopeBadge(task.scope)
-                    if let cat = category {
-                        badge(cat.name, color: Color(hex: cat.colorHex))
+                        HStack(spacing: 4) {
+                            scopeBadge(task.scope)
+                            if let cat = category {
+                                badge(cat.name, color: Color(hex: cat.colorHex))
+                            }
+                            if task.priority != .medium {
+                                badge(task.priority.displayName, color: task.priority.color)
+                            }
+                        }
                     }
-                    if task.priority != .medium {
-                        badge(task.priority.displayName, color: task.priority.color)
-                    }
+                    Spacer(minLength: 0)
                 }
             }
-            .contentShape(Rectangle())
-            .onTapGesture { onEdit(task) }
-
-            Spacer(minLength: 0)
+            .buttonStyle(.plain)
 
             // Status menu
             statusMenu
@@ -82,7 +89,7 @@ struct TaskRowView: View {
         .padding(.vertical, 6)
         .contentShape(Rectangle())
         .contextMenu {
-            Button("Edit") { onEdit(task) }
+            Button("Show Detail") { onSelect(task) }
             Divider()
             Button("Delete", role: .destructive) { taskStore.deleteTask(id: task.id) }
         }
@@ -188,7 +195,7 @@ struct TaskRowView: View {
                 .frame(width: 16)
                 .padding(.leading, 20)
 
-                SubtaskRowView(item: child, taskStore: taskStore, onEdit: onEdit)
+                SubtaskRowView(item: child, taskStore: taskStore, onSelect: onSelect)
             }
         }
     }
@@ -225,32 +232,38 @@ struct TaskRowView: View {
 private struct SubtaskRowView: View {
     let item: TaskItem
     let taskStore: TaskStore
-    let onEdit: (TaskItem) -> Void
+    let onSelect: (TaskItem) -> Void
 
     @State private var showProgressPopover = false
     @State private var draftProgress: Double = 0
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
+            // Checkbox — 22×22 hit area (indicator is 13 pt)
             Button { taskStore.toggleDone(id: item.id) } label: {
                 TaskStatusIndicatorView(status: item.status, size: 13, isSubtask: true)
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
 
-            // Title + scope — tap to open edit sheet
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.title)
-                    .font(.callout)
-                    .foregroundStyle(item.isDone ? .tertiary : .secondary)
-                    .strikethrough(item.isDone, color: Color.secondary)
-                    .lineLimit(1)
+            // Title + scope as Button with Spacer inside — fills remaining
+            // width and keeps hit area clearly separated from checkbox.
+            Button { onSelect(item) } label: {
+                HStack(alignment: .center, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.title)
+                            .font(.callout)
+                            .foregroundStyle(item.isDone ? .tertiary : .secondary)
+                            .strikethrough(item.isDone, color: Color.secondary)
+                            .lineLimit(1)
 
-                scopeBadge(item.scope)
+                        scopeBadge(item.scope)
+                    }
+                    Spacer(minLength: 0)
+                }
             }
-            .contentShape(Rectangle())
-            .onTapGesture { onEdit(item) }
-
-            Spacer(minLength: 0)
+            .buttonStyle(.plain)
 
             statusMenu
             progressButton
@@ -259,7 +272,7 @@ private struct SubtaskRowView: View {
         .padding(.horizontal, 8)
         .contentShape(Rectangle())
         .contextMenu {
-            Button("Edit") { onEdit(item) }
+            Button("Show Detail") { onSelect(item) }
             Divider()
             Button("Delete", role: .destructive) { taskStore.deleteTask(id: item.id) }
         }

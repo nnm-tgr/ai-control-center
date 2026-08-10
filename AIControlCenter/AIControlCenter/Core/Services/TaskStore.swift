@@ -82,8 +82,14 @@ final class TaskStore {
 
     func toggleDone(id: UUID) {
         guard let idx = tasks.firstIndex(where: { $0.id == id }) else { return }
-        let next: TaskStatus = tasks[idx].isDone ? .todo : .done
-        setStatus(id: id, status: next)
+        if tasks[idx].isDone {
+            tasks[idx].status = .todo
+            tasks[idx].progress = 0
+            tasks[idx].updatedAt = .now
+            saveTasks()
+        } else {
+            setStatus(id: id, status: .done)
+        }
     }
 
     func setStatus(id: UUID, status: TaskStatus) {
