@@ -101,6 +101,32 @@ final class TaskStore {
         saveTasks()
     }
 
+    // MARK: - Note CRUD
+
+    func addNote(to taskID: UUID, content: String) {
+        guard let idx = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        tasks[idx].notes.append(TaskNote(content: content))
+        tasks[idx].updatedAt = .now
+        saveTasks()
+    }
+
+    func updateNote(taskID: UUID, noteID: UUID, content: String) {
+        guard let taskIdx = tasks.firstIndex(where: { $0.id == taskID }),
+              let noteIdx = tasks[taskIdx].notes.firstIndex(where: { $0.id == noteID })
+        else { return }
+        tasks[taskIdx].notes[noteIdx].content = content
+        tasks[taskIdx].notes[noteIdx].updatedAt = .now
+        tasks[taskIdx].updatedAt = .now
+        saveTasks()
+    }
+
+    func deleteNote(taskID: UUID, noteID: UUID) {
+        guard let taskIdx = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        tasks[taskIdx].notes.removeAll { $0.id == noteID }
+        tasks[taskIdx].updatedAt = .now
+        saveTasks()
+    }
+
     // MARK: - Group CRUD
 
     func addTaskGroup(_ group: TaskGroup) {

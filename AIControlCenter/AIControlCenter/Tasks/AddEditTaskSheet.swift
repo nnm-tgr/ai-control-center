@@ -8,7 +8,6 @@ struct AddEditTaskSheet: View {
     var defaultScope: TaskScope?
 
     @State private var title: String = ""
-    @State private var notes: String = ""
     @State private var status: TaskStatus = .todo
     @State private var priority: TaskPriority = .medium
     @State private var selectedScope: TaskScope = .global
@@ -44,16 +43,6 @@ struct AddEditTaskSheet: View {
                     field("Title") {
                         TextField("Task title", text: $title)
                             .textFieldStyle(.roundedBorder)
-                    }
-
-                    field("Notes") {
-                        TextEditor(text: $notes)
-                            .font(.callout)
-                            .frame(minHeight: 60)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 5)
-                                    .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
-                            )
                     }
 
                     field("Priority") {
@@ -242,7 +231,6 @@ struct AddEditTaskSheet: View {
     private func configure() {
         if let task = editingTask {
             title = task.title
-            notes = task.notes
             status = task.status
             priority = task.priority
             selectedParentID = task.parentID
@@ -260,7 +248,6 @@ struct AddEditTaskSheet: View {
 
         if var task = editingTask {
             task.title = trimmed
-            task.notes = notes
             task.status = status
             task.priority = priority
             task.scope = selectedScope
@@ -271,7 +258,6 @@ struct AddEditTaskSheet: View {
         } else {
             taskStore.addTask(TaskItem(
                 title: trimmed,
-                notes: notes,
                 priority: priority,
                 scope: selectedScope,
                 parentID: selectedParentID,
