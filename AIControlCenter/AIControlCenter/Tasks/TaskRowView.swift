@@ -44,13 +44,14 @@ struct TaskRowView: View {
                 .buttonStyle(.plain)
             }
 
-            // Checkbox — 24×24 hit area prevents misses on the 15 pt indicator
+            // Checkbox — disabled for parent tasks (status is derived from children)
             Button { taskStore.toggleDone(id: task.id) } label: {
                 TaskStatusIndicatorView(status: task.status, size: 15)
                     .frame(width: 24, height: 24)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .disabled(hasChildren)
 
             // Title + badges as a Button so it has a well-defined,
             // non-overlapping hit area that doesn't compete with the checkbox.
@@ -79,11 +80,14 @@ struct TaskRowView: View {
             }
             .buttonStyle(.plain)
 
-            // Status menu
-            statusMenu
-
-            // Progress
-            progressButton
+            // Status and progress: read-only for parent tasks (derived from children)
+            if hasChildren {
+                derivedStatusBadge
+                derivedProgressText
+            } else {
+                statusMenu
+                progressButton
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
@@ -93,6 +97,27 @@ struct TaskRowView: View {
             Divider()
             Button("Delete", role: .destructive) { taskStore.deleteTask(id: task.id) }
         }
+    }
+
+    // MARK: - Derived (read-only) controls for parent tasks
+
+    private var derivedStatusBadge: some View {
+        Text(task.status.displayName)
+            .font(.caption)
+            .fontWeight(.medium)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(task.status.color.opacity(0.13))
+            .foregroundStyle(task.status.color.opacity(0.7))
+            .clipShape(Capsule())
+    }
+
+    private var derivedProgressText: some View {
+        Text("\(task.progress)%")
+            .font(.caption.monospacedDigit())
+            .fontWeight(.medium)
+            .foregroundStyle(.secondary.opacity(0.6))
+            .frame(width: 34, alignment: .trailing)
     }
 
     // MARK: - Status menu

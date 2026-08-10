@@ -955,6 +955,162 @@ check(noopTasks[0].progress == beforeProgress, "unknown id: progress unchanged")
 check(noopTasks.count == 1,                    "unknown id: task list unchanged")
 
 // ──────────────────────────────────────────
+// Helpers for parent-sync tests
+// (mirrors TaskStore.syncParent logic)
+// ──────────────────────────────────────────
+
+func syncParent(id: UUID, in tasks: inout [TaskItem]) {
+    let children = tasks.filter { $0.parentID == id }
+    guard !children.isEmpty,
+          let idx = tasks.firstIndex(where: { $0.id == id })
+    else { return }
+
+    let avg      = children.map(\.progress).reduce(0, +) / children.count
+    let allDone  = children.allSatisfy(\.isDone)
+    let anyActive = children.contains { $0.status == .inProgress || $0.status == .inReview }
+    let allOnHold = children.allSatisfy { $0.status == .onHold }
+
+    tasks[idx].progress = avg
+    tasks[idx].status   = allDone    ? .done       :
+                          anyActive  ? .inProgress :
+                          allOnHold  ? .onHold     : .todo
+}
+
+// ──────────────────────────────────────────
+// Test 24: syncParent — all children done → parent done/100%
+// ──────────────────────────────────────────
+print("\n=== Test 24: syncParent — all children done → parent done/100% ===")
+
+let parentID24 = UUID()
+var tasks24: [TaskItem] = [
+    TaskItem(id: parentID24, title: "Parent"),
+    TaskItem(title: "Child A", status: .done, parentID: parentID24, progress: 100),
+    TaskItem(title: "Child B", status: .done, parentID: parentID24, progress: 100),
+    TaskItem(title: "Child C", status: .done, parentID: parentID24, progress: 100),
+]
+
+syncParent(id: parentID24, in: &tasks24)
+let parent24 = tasks24.first(where: { $0.id == parentID24 })!
+check(parent24.status   == .done, "all children done → parent status = .done")
+check(parent24.progress == 100,   "all children done → parent progress = 100")
+
+// ──────────────────────────────────────────
+// Test 25: syncParent — partial progress → parent gets average
+// ──────────────────────────────────────────
+print("\n=== Test 25: syncParent — partial progress → parent gets average ===")
+
+let parentID25 = UUID()
+var tasks25: [TaskItem] = [
+    TaskItem(id: parentID25, title: "Parent"),
+    TaskItem(title: "Child A", status: .done, parentID: parentID25, progress: 100),
+    TaskItem(title: "Child B", status: .inProgress, parentID: parentID25, progress: 60),
+    TaskItem(title: "Child C", status: .todo, parentID: parentID25, progress: 0),
+]
+
+syncParent(id: parentID25, in: &tasks25)
+let parent25 = tasks25.first(where: { $0.id == parentID25 })!
+check(parent25.progress == 53,          // (100+60+0)/3 = 53
+      "partial progress → parent avg = 53 (got \(parent25.progress))")
+check(parent25.status == .inProgress,
+      "any child inProgress → parent status = .inProgress")
+
+// ──────────────────────────────────────────
+// Test 26: syncParent — status derivation rules
+// ──────────────────────────────────────────
+print("\n=== Test 26: syncParent — status derivation rules ===")
+
+// All onHold → parent onHold
+let parentID26a = UUID()
+var tasks26a: [TaskItem] = [
+    TaskItem(id: parentID26a, title: "Parent"),
+    TaskItem(title: "C1", status: .onHold, parentID: parentID26a, progress: 20),
+    TaskItem(title: "C2", status: .onHold, parentID: parentID26a, progress: 30),
+]
+syncParent(id: parentID26a, in: &tasks26a)
+check(tasks26a.first(where: { $0.id == parentID26a })!.status == .onHold,
+      "all children onHold → parent = .onHold")
+
+// Mix of todo and done (not all done) → parent todo
+let parentID26b = UUID()
+var tasks26b: [TaskItem] = [
+    TaskItem(id: parentID26b, title: "Parent"),
+    TaskItem(title: "C1", status: .done, parentID: parentID26b, progress: 100),
+    TaskItem(title: "C2", status: .todo, parentID: parentID26b, progress: 0),
+]
+syncParent(id: parentID26b, in: &tasks26b)
+let p26b = tasks26b.first(where: { $0.id == parentID26b })!
+check(p26b.status   == .todo, "done+todo mix → parent = .todo")
+check(p26b.progress == 50,    "done+todo mix → parent progress = 50 (got \(p26b.progress))")
+
+// inReview child → parent inProgress
+let parentID26c = UUID()
+var tasks26c: [TaskItem] = [
+    TaskItem(id: parentID26c, title: "Parent"),
+    TaskItem(title: "C1", status: .inReview, parentID: parentID26c, progress: 80),
+    TaskItem(title: "C2", status: .todo, parentID: parentID26c, progress: 0),
+]
+syncParent(id: parentID26c, in: &tasks26c)
+check(tasks26c.first(where: { $0.id == parentID26c })!.status == .inProgress,
+      "inReview child → parent = .inProgress")
+
+// ──────────────────────────────────────────
+// Test 27: syncParent — no-op when children list is empty
+// ──────────────────────────────────────────
+print("\n=== Test 27: syncParent — no-op when no children ===")
+
+let loneID = UUID()
+var tasks27: [TaskItem] = [
+    TaskItem(id: loneID, title: "Lone task", status: .inProgress, progress: 60),
+]
+syncParent(id: loneID, in: &tasks27)
+let lone = tasks27.first(where: { $0.id == loneID })!
+check(lone.status   == .inProgress, "no children → status unchanged (got \(lone.status))")
+check(lone.progress == 60,          "no children → progress unchanged")
+
+// ──────────────────────────────────────────
+// Test 28: syncParent after child toggleDone (full integration)
+// Simulates the full flow: toggle child → sync parent
+// ──────────────────────────────────────────
+print("\n=== Test 28: full flow — toggle child → syncParent ===")
+
+let parentID28 = UUID()
+var tasks28: [TaskItem] = [
+    TaskItem(id: parentID28, title: "Parent", status: .todo, progress: 0),
+    TaskItem(title: "Sub 1", status: .todo, parentID: parentID28, progress: 0),
+    TaskItem(title: "Sub 2", status: .todo, parentID: parentID28, progress: 0),
+]
+
+// Toggle Sub 1 → done
+if let idx = tasks28.firstIndex(where: { $0.title == "Sub 1" }) {
+    tasks28[idx].status   = .done
+    tasks28[idx].progress = 100
+}
+syncParent(id: parentID28, in: &tasks28)
+let p28a = tasks28.first(where: { $0.id == parentID28 })!
+check(p28a.progress == 50,   "1/2 done → parent progress = 50 (got \(p28a.progress))")
+check(p28a.status   == .todo, "1/2 done → parent status = .todo")
+
+// Toggle Sub 2 → done
+if let idx = tasks28.firstIndex(where: { $0.title == "Sub 2" }) {
+    tasks28[idx].status   = .done
+    tasks28[idx].progress = 100
+}
+syncParent(id: parentID28, in: &tasks28)
+let p28b = tasks28.first(where: { $0.id == parentID28 })!
+check(p28b.progress == 100,  "2/2 done → parent progress = 100")
+check(p28b.status   == .done, "2/2 done → parent status = .done")
+
+// Toggle Sub 1 back → todo (parent must revert)
+if let idx = tasks28.firstIndex(where: { $0.title == "Sub 1" }) {
+    tasks28[idx].status   = .todo
+    tasks28[idx].progress = 0
+}
+syncParent(id: parentID28, in: &tasks28)
+let p28c = tasks28.first(where: { $0.id == parentID28 })!
+check(p28c.progress == 50,   "revert Sub1 → parent progress back to 50 (got \(p28c.progress))")
+check(p28c.status   == .todo, "revert Sub1 → parent status back to .todo")
+
+// ──────────────────────────────────────────
 // Summary
 // ──────────────────────────────────────────
 print("\n=== Results ===")

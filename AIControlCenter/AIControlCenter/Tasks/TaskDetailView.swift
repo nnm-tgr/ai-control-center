@@ -67,8 +67,14 @@ struct TaskDetailView: View {
                 }
             }
 
-            if task.progress > 0 || task.status == .inProgress {
+            let isParent = taskStore.hasChildren(id: task.id)
+            if isParent || task.progress > 0 || task.status == .inProgress {
                 progressRow(task: task)
+            }
+            if isParent {
+                Label("Progress and status derived from subtasks", systemImage: "arrow.triangle.merge")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
     }
