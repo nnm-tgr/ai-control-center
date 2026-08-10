@@ -7,7 +7,7 @@ struct TaskRowView: View {
     let taskStore: TaskStore
     let isExpanded: Bool
     let onToggleExpand: () -> Void
-    let onEdit: (TaskItem) -> Void
+    let onSelect: (TaskItem) -> Void
 
     @State private var showProgressPopover = false
     @State private var draftProgress: Double = 0
@@ -68,7 +68,7 @@ struct TaskRowView: View {
                 }
             }
             .contentShape(Rectangle())
-            .onTapGesture { onEdit(task) }
+            .onTapGesture { onSelect(task) }
 
             Spacer(minLength: 0)
 
@@ -82,7 +82,7 @@ struct TaskRowView: View {
         .padding(.vertical, 6)
         .contentShape(Rectangle())
         .contextMenu {
-            Button("Edit") { onEdit(task) }
+            Button("Show Detail") { onSelect(task) }
             Divider()
             Button("Delete", role: .destructive) { taskStore.deleteTask(id: task.id) }
         }
@@ -188,7 +188,7 @@ struct TaskRowView: View {
                 .frame(width: 16)
                 .padding(.leading, 20)
 
-                SubtaskRowView(item: child, taskStore: taskStore, onEdit: onEdit)
+                SubtaskRowView(item: child, taskStore: taskStore, onSelect: onSelect)
             }
         }
     }
@@ -225,7 +225,7 @@ struct TaskRowView: View {
 private struct SubtaskRowView: View {
     let item: TaskItem
     let taskStore: TaskStore
-    let onEdit: (TaskItem) -> Void
+    let onSelect: (TaskItem) -> Void
 
     @State private var showProgressPopover = false
     @State private var draftProgress: Double = 0
@@ -248,7 +248,7 @@ private struct SubtaskRowView: View {
                 scopeBadge(item.scope)
             }
             .contentShape(Rectangle())
-            .onTapGesture { onEdit(item) }
+            .onTapGesture { onSelect(item) }
 
             Spacer(minLength: 0)
 
@@ -259,7 +259,7 @@ private struct SubtaskRowView: View {
         .padding(.horizontal, 8)
         .contentShape(Rectangle())
         .contextMenu {
-            Button("Edit") { onEdit(item) }
+            Button("Show Detail") { onSelect(item) }
             Divider()
             Button("Delete", role: .destructive) { taskStore.deleteTask(id: item.id) }
         }

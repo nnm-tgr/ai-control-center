@@ -4,7 +4,7 @@ struct TaskSectionView: View {
     @Environment(AppState.self) private var appState
     let scopeFilter: TaskScopeFilter
     let onAddTask: (TaskScope?) -> Void
-    let onEditTask: (TaskItem) -> Void
+    let onSelectTask: (TaskItem) -> Void
 
     @State private var collapsedTaskIDs: Set<UUID> = []
 
@@ -81,7 +81,7 @@ struct TaskSectionView: View {
                             collapsedTaskIDs.insert(task.id)
                         }
                     },
-                    onEdit: onEditTask
+                    onSelect: onSelectTask
                 )
                 if task.id != lastID {
                     Divider().padding(.leading, 36)
