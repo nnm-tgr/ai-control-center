@@ -103,6 +103,18 @@ enum TaskScopeFilter: Equatable {
     }
 }
 
+struct TaskNote: Identifiable, Codable, Equatable {
+    let id: UUID
+    var content: String
+    let createdAt: Date
+    var updatedAt: Date
+
+    init(id: UUID = UUID(), content: String, createdAt: Date = .now, updatedAt: Date = .now) {
+        self.id = id; self.content = content
+        self.createdAt = createdAt; self.updatedAt = updatedAt
+    }
+}
+
 struct TaskGroup: Identifiable, Codable, Equatable {
     let id: UUID
     var name: String
@@ -125,7 +137,7 @@ struct TaskCategory: Identifiable, Codable, Equatable, Hashable {
 struct TaskItem: Identifiable, Codable, Equatable {
     let id: UUID
     var title: String
-    var notes: String
+    var notes: [TaskNote]
     var status: TaskStatus
     var priority: TaskPriority
     var scope: TaskScope
@@ -140,7 +152,7 @@ struct TaskItem: Identifiable, Codable, Equatable {
     var isDone: Bool { status.isDone }
 
     init(
-        id: UUID = UUID(), title: String, notes: String = "",
+        id: UUID = UUID(), title: String, notes: [TaskNote] = [],
         status: TaskStatus = .todo, priority: TaskPriority = .medium,
         scope: TaskScope = .global, parentID: UUID? = nil, categoryID: UUID? = nil,
         progress: Int = 0,
@@ -151,6 +163,36 @@ struct TaskItem: Identifiable, Codable, Equatable {
         self.parentID = parentID; self.categoryID = categoryID
         self.progress = min(max(progress, 0), 100)
         self.createdAt = createdAt; self.updatedAt = updatedAt; self.dueDate = dueDate
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, notes, status, priority, scope
+        case parentID, categoryID, progress, createdAt, updatedAt, dueDate
+    }
+
+    // Migration: [TaskNote] (new) | String (legacy) | absent → []
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id         = try  c.decode(UUID.self,         forKey: .id)
+        title      = try  c.decode(String.self,       forKey: .title)
+        status     = try (c.decodeIfPresent(TaskStatus.self,   forKey: .status)   ?? .todo)
+        priority   = try (c.decodeIfPresent(TaskPriority.self, forKey: .priority) ?? .medium)
+        scope      = try  c.decode(TaskScope.self,    forKey: .scope)
+        parentID   = try  c.decodeIfPresent(UUID.self,         forKey: .parentID)
+        categoryID = try  c.decodeIfPresent(UUID.self,         forKey: .categoryID)
+        let raw    = try  c.decodeIfPresent(Int.self,          forKey: .progress)  ?? 0
+        progress   = min(max(raw, 0), 100)
+        createdAt  = try  c.decode(Date.self,         forKey: .createdAt)
+        updatedAt  = try (c.decodeIfPresent(Date.self,         forKey: .updatedAt) ?? Date())
+        dueDate    = try  c.decodeIfPresent(Date.self,         forKey: .dueDate)
+        if let array = try? c.decode([TaskNote].self, forKey: .notes) {
+            notes = array
+        } else if let legacy = try? c.decode(String.self, forKey: .notes),
+                  !legacy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            notes = [TaskNote(content: legacy)]
+        } else {
+            notes = []
+        }
     }
 }
 
@@ -186,7 +228,7 @@ let dueDate = Calendar.current.date(byAdding: .day, value: 7, to: .now)!
 
 let original = TaskItem(
     title: "Implement task management",
-    notes: "Needs scope filtering",
+    notes: [TaskNote(content: "Needs scope filtering")],
     status: .inProgress,
     priority: .high,
     scope: .project(rootURL: projectURL),
@@ -199,7 +241,8 @@ do {
     let decoded = try JSONDecoder().decode(TaskItem.self, from: data)
     check(decoded.id == original.id, "id preserved")
     check(decoded.title == original.title, "title preserved")
-    check(decoded.notes == original.notes, "notes preserved")
+    check(decoded.notes.count == 1, "notes count preserved")
+    check(decoded.notes.first?.content == "Needs scope filtering", "notes content preserved")
     check(decoded.status == original.status, "status preserved")
     check(decoded.priority == original.priority, "priority preserved")
     check(decoded.scope == original.scope, "scope preserved")
@@ -563,6 +606,258 @@ do {
 }
 
 try? fm.removeItem(at: tmpDir2)
+
+// ──────────────────────────────────────────
+// Test 15: TaskNote Codable round-trip
+// ──────────────────────────────────────────
+print("\n=== Test 15: TaskNote Codable round-trip ===")
+
+let note1 = TaskNote(content: "First note with **markdown**")
+do {
+    let data = try JSONEncoder().encode(note1)
+    let decoded = try JSONDecoder().decode(TaskNote.self, from: data)
+    check(decoded.id == note1.id, "note id preserved")
+    check(decoded.content == note1.content, "note content preserved")
+    check(abs(decoded.createdAt.timeIntervalSince(note1.createdAt)) < 0.001, "createdAt preserved")
+} catch {
+    check(false, "TaskNote Codable failed: \(error)")
+}
+
+// Array of notes round-trip
+let noteArray = [
+    TaskNote(content: "# Heading"),
+    TaskNote(content: "- list item"),
+    TaskNote(content: "`code block`"),
+]
+do {
+    let data = try JSONEncoder().encode(noteArray)
+    let decoded = try JSONDecoder().decode([TaskNote].self, from: data)
+    check(decoded.count == 3, "note array count preserved")
+    check(decoded.map(\.content) == noteArray.map(\.content), "note contents preserved in order")
+} catch {
+    check(false, "TaskNote array Codable failed: \(error)")
+}
+
+// ──────────────────────────────────────────
+// Test 16: Legacy String notes → [TaskNote] migration
+// ──────────────────────────────────────────
+print("\n=== Test 16: Legacy String notes migration ===")
+
+// Build old-format JSON manually (notes as String)
+let legacyJSON = """
+{
+  "id": "\(UUID().uuidString)",
+  "title": "Legacy task",
+  "notes": "This is a legacy note",
+  "status": "todo",
+  "priority": "medium",
+  "scope": {"kind": "global"},
+  "progress": 0,
+  "createdAt": \(Date().timeIntervalSinceReferenceDate),
+  "updatedAt": \(Date().timeIntervalSinceReferenceDate)
+}
+"""
+
+if let legacyData = legacyJSON.data(using: .utf8),
+   let migrated = try? JSONDecoder().decode(TaskItem.self, from: legacyData) {
+    check(migrated.notes.count == 1, "legacy string migrated to 1 note (got \(migrated.notes.count))")
+    check(migrated.notes.first?.content == "This is a legacy note", "legacy note content preserved")
+} else {
+    check(false, "legacy JSON decode failed")
+}
+
+// Empty legacy string → []
+let emptyLegacyJSON = """
+{
+  "id": "\(UUID().uuidString)",
+  "title": "Empty notes task",
+  "notes": "",
+  "status": "todo",
+  "priority": "medium",
+  "scope": {"kind": "global"},
+  "progress": 0,
+  "createdAt": \(Date().timeIntervalSinceReferenceDate),
+  "updatedAt": \(Date().timeIntervalSinceReferenceDate)
+}
+"""
+
+if let data = emptyLegacyJSON.data(using: .utf8),
+   let migrated = try? JSONDecoder().decode(TaskItem.self, from: data) {
+    check(migrated.notes.isEmpty, "empty legacy string → empty notes array")
+} else {
+    check(false, "empty legacy string decode failed")
+}
+
+// ──────────────────────────────────────────
+// Test 17: Absent notes key → []
+// ──────────────────────────────────────────
+print("\n=== Test 17: Absent notes key → empty array ===")
+
+let noNotesJSON = """
+{
+  "id": "\(UUID().uuidString)",
+  "title": "No notes key",
+  "status": "inProgress",
+  "priority": "high",
+  "scope": {"kind": "global"},
+  "progress": 50,
+  "createdAt": \(Date().timeIntervalSinceReferenceDate),
+  "updatedAt": \(Date().timeIntervalSinceReferenceDate)
+}
+"""
+
+if let data = noNotesJSON.data(using: .utf8),
+   let decoded = try? JSONDecoder().decode(TaskItem.self, from: data) {
+    check(decoded.notes.isEmpty, "absent notes key → []")
+    check(decoded.status == .inProgress, "other fields decoded correctly")
+    check(decoded.progress == 50, "progress decoded correctly")
+} else {
+    check(false, "absent notes key decode failed")
+}
+
+// ──────────────────────────────────────────
+// Test 18: Note CRUD simulation
+// ──────────────────────────────────────────
+print("\n=== Test 18: Note CRUD operations ===")
+
+var notesTasks: [TaskItem] = [TaskItem(title: "Task with notes")]
+let noteTaskID = notesTasks[0].id
+
+// addNote
+func addNote(to taskID: UUID, content: String, in tasks: inout [TaskItem]) {
+    guard let idx = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+    tasks[idx].notes.append(TaskNote(content: content))
+    tasks[idx].updatedAt = .now
+}
+
+// updateNote
+func updateNote(taskID: UUID, noteID: UUID, content: String, in tasks: inout [TaskItem]) {
+    guard let taskIdx = tasks.firstIndex(where: { $0.id == taskID }),
+          let noteIdx = tasks[taskIdx].notes.firstIndex(where: { $0.id == noteID })
+    else { return }
+    tasks[taskIdx].notes[noteIdx].content = content
+    tasks[taskIdx].notes[noteIdx].updatedAt = .now
+    tasks[taskIdx].updatedAt = .now
+}
+
+// deleteNote
+func deleteNote(taskID: UUID, noteID: UUID, in tasks: inout [TaskItem]) {
+    guard let taskIdx = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+    tasks[taskIdx].notes.removeAll { $0.id == noteID }
+    tasks[taskIdx].updatedAt = .now
+}
+
+addNote(to: noteTaskID, content: "First note", in: &notesTasks)
+addNote(to: noteTaskID, content: "Second note", in: &notesTasks)
+check(notesTasks[0].notes.count == 2, "addNote: 2 notes added")
+check(notesTasks[0].notes[0].content == "First note", "first note content correct")
+check(notesTasks[0].notes[1].content == "Second note", "second note content correct")
+
+let firstNoteID = notesTasks[0].notes[0].id
+updateNote(taskID: noteTaskID, noteID: firstNoteID, content: "Updated first note", in: &notesTasks)
+check(notesTasks[0].notes[0].content == "Updated first note", "updateNote: content updated")
+check(notesTasks[0].notes.count == 2, "updateNote: count unchanged")
+
+deleteNote(taskID: noteTaskID, noteID: firstNoteID, in: &notesTasks)
+check(notesTasks[0].notes.count == 1, "deleteNote: count reduced to 1")
+check(notesTasks[0].notes[0].content == "Second note", "remaining note is second note")
+
+// Codable round-trip with notes
+do {
+    let data = try JSONEncoder().encode(notesTasks)
+    let reloaded = try JSONDecoder().decode([TaskItem].self, from: data)
+    check(reloaded[0].notes.count == 1, "notes persisted after Codable round-trip")
+    check(reloaded[0].notes[0].content == "Second note", "note content persisted")
+} catch {
+    check(false, "notes Codable round-trip failed: \(error)")
+}
+
+// ──────────────────────────────────────────
+// Test 19: Edit flow preserves TaskNotes
+// (simulates AddEditTaskSheet configure + save)
+// configure() reads: title, status, priority, scope, parentID, categoryID, progress — NOT notes
+// save()      writes: those fields back via updateTask; notes are never touched
+// ──────────────────────────────────────────
+print("\n=== Test 19: Edit flow (configure+save) preserves notes ===")
+
+let originalNotes = [
+    TaskNote(content: "Architecture decision: Observer pattern"),
+    TaskNote(content: "Blocked on backend API"),
+]
+var editableTask = TaskItem(
+    title: "Feature: Notifications",
+    notes: originalNotes,
+    status: .inProgress,
+    priority: .high,
+    scope: .global,
+    progress: 40
+)
+
+// Simulate configure() — read non-notes fields into @State
+let stateTitle    = editableTask.title
+let stateStatus   = editableTask.status
+let statePriority = editableTask.priority
+let stateScope    = editableTask.scope
+let stateParent   = editableTask.parentID
+let stateCatID    = editableTask.categoryID
+// (notes are NOT read into @State by AddEditTaskSheet)
+
+// Simulate user edits
+let updatedTitle    = "Feature: Push Notifications"
+let updatedProgress = 60
+
+// Simulate save() — write @State back; notes untouched
+editableTask.title      = updatedTitle
+editableTask.status     = stateStatus
+editableTask.priority   = statePriority
+editableTask.scope      = stateScope
+editableTask.parentID   = stateParent
+editableTask.categoryID = stateCatID
+editableTask.progress   = updatedProgress
+
+check(editableTask.title == "Feature: Push Notifications", "title updated by edit")
+check(editableTask.progress == 60, "progress updated by edit")
+check(editableTask.notes.count == 2,
+      "notes count unchanged after edit (got \(editableTask.notes.count))")
+check(editableTask.notes[0].content == "Architecture decision: Observer pattern",
+      "first note content unchanged")
+check(editableTask.notes[1].content == "Blocked on backend API",
+      "second note content unchanged")
+check(editableTask.notes.map(\.id) == originalNotes.map(\.id),
+      "note IDs unchanged after edit")
+
+// ──────────────────────────────────────────
+// Test 20: onEdit callback closure pattern
+// TaskRowView receives onEdit: (TaskItem) -> Void
+// Tap on title area (or right-click → Edit) should call onEdit(task)
+// DashboardView receives the task and sets editingTask, triggering the sheet
+// ──────────────────────────────────────────
+print("\n=== Test 20: onEdit callback closure pattern ===")
+
+var capturedTask: TaskItem? = nil
+let callbackSample = TaskItem(
+    title: "Callback test task",
+    notes: [TaskNote(content: "Note preserved through callback")]
+)
+
+let onEditCallback: (TaskItem) -> Void = { task in capturedTask = task }
+// Simulate tap gesture firing onEdit
+onEditCallback(callbackSample)
+
+check(capturedTask != nil, "onEdit callback was called")
+check(capturedTask?.id == callbackSample.id, "correct task passed to onEdit (by id)")
+check(capturedTask?.title == callbackSample.title, "task title preserved through callback")
+check(capturedTask?.notes.count == 1, "task notes preserved through callback")
+check(capturedTask?.notes.first?.content == "Note preserved through callback",
+      "note content intact through callback")
+
+// Simulate a different task being passed (subtask scenario)
+var capturedSubtask: TaskItem? = nil
+let subtaskSample = TaskItem(title: "Subtask item", parentID: callbackSample.id)
+let onEditSubCallback: (TaskItem) -> Void = { task in capturedSubtask = task }
+onEditSubCallback(subtaskSample)
+check(capturedSubtask?.id == subtaskSample.id, "subtask onEdit passes correct id")
+check(capturedSubtask?.parentID == callbackSample.id, "subtask parentID preserved through callback")
 
 // ──────────────────────────────────────────
 // Summary

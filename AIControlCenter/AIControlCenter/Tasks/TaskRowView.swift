@@ -49,7 +49,7 @@ struct TaskRowView: View {
             }
             .buttonStyle(.plain)
 
-            // Title + badges
+            // Title + badges — tap to open edit sheet
             VStack(alignment: .leading, spacing: 3) {
                 Text(task.title)
                     .font(.body)
@@ -67,6 +67,8 @@ struct TaskRowView: View {
                     }
                 }
             }
+            .contentShape(Rectangle())
+            .onTapGesture { onEdit(task) }
 
             Spacer(minLength: 0)
 
@@ -235,6 +237,7 @@ private struct SubtaskRowView: View {
             }
             .buttonStyle(.plain)
 
+            // Title + scope — tap to open edit sheet
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title)
                     .font(.callout)
@@ -244,6 +247,8 @@ private struct SubtaskRowView: View {
 
                 scopeBadge(item.scope)
             }
+            .contentShape(Rectangle())
+            .onTapGesture { onEdit(item) }
 
             Spacer(minLength: 0)
 
