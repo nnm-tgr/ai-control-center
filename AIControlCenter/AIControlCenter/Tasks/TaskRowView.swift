@@ -34,7 +34,7 @@ struct TaskRowView: View {
             // Title + badges
             VStack(alignment: .leading, spacing: 3) {
                 Text(task.title)
-                    .font(.callout)
+                    .font(.body)
                     .foregroundStyle(task.isDone ? .tertiary : .primary)
                     .strikethrough(task.isDone, color: Color.secondary)
                     .lineLimit(1)
@@ -81,7 +81,7 @@ struct TaskRowView: View {
             }
         } label: {
             Text(task.status.displayName)
-                .font(.caption2)
+                .font(.caption)
                 .fontWeight(.medium)
                 .padding(.horizontal, 7)
                 .padding(.vertical, 3)
@@ -101,7 +101,7 @@ struct TaskRowView: View {
             showProgressPopover = true
         } label: {
             Text("\(task.progress)%")
-                .font(.caption2.monospacedDigit())
+                .font(.caption.monospacedDigit())
                 .fontWeight(.medium)
                 .foregroundStyle(.secondary)
                 .frame(width: 34, alignment: .trailing)
@@ -116,11 +116,11 @@ struct TaskRowView: View {
         VStack(spacing: 12) {
             HStack {
                 Text("Progress")
-                    .font(.caption.bold())
+                    .font(.callout.bold())
                     .foregroundStyle(.secondary)
                 Spacer()
                 Text("\(Int(draftProgress))%")
-                    .font(.callout.monospacedDigit().bold())
+                    .font(.body.monospacedDigit().bold())
             }
 
             Slider(value: $draftProgress, in: 0...100, step: 5)
@@ -182,7 +182,7 @@ struct TaskRowView: View {
             .buttonStyle(.plain)
 
             Text(item.title)
-                .font(.caption)
+                .font(.callout)
                 .foregroundStyle(item.isDone ? .tertiary : .secondary)
                 .strikethrough(item.isDone, color: Color.secondary)
                 .lineLimit(1)
@@ -191,7 +191,7 @@ struct TaskRowView: View {
 
             // Compact status indicator for subtask
             Text(item.status.displayName)
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(item.status.color.opacity(0.8))
         }
         .padding(.vertical, 4)
@@ -213,7 +213,7 @@ struct TaskRowView: View {
         case .group:            badge("Group", color: .purple)
         case .global:
             Text("Global")
-                .font(.caption2).fontWeight(.medium)
+                .font(.caption).fontWeight(.medium)
                 .padding(.horizontal, 5).padding(.vertical, 1)
                 .background(Color.secondary.opacity(0.1))
                 .foregroundStyle(.secondary)
@@ -223,7 +223,7 @@ struct TaskRowView: View {
 
     private func badge(_ text: String, color: Color) -> some View {
         Text(text)
-            .font(.caption2).fontWeight(.medium)
+            .font(.caption).fontWeight(.medium)
             .padding(.horizontal, 5).padding(.vertical, 1)
             .background(color.opacity(0.15))
             .foregroundStyle(color)
