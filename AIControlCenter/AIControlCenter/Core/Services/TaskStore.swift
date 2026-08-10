@@ -131,14 +131,11 @@ final class TaskStore {
         else { return }
 
         let avg = children.map(\.progress).reduce(0, +) / children.count
-        let allDone   = children.allSatisfy(\.isDone)
-        let anyActive = children.contains { $0.status == .inProgress || $0.status == .inReview }
-        let allOnHold = children.allSatisfy { $0.status == .onHold }
 
-        tasks[idx].progress  = avg
-        tasks[idx].status    = allDone   ? .done       :
-                               anyActive ? .inProgress :
-                               allOnHold ? .onHold     : .todo
+        tasks[idx].progress = avg
+        tasks[idx].status   = avg == 100 ? .done       :
+                              avg >  0   ? .inProgress :
+                                           .todo
         tasks[idx].updatedAt = .now
         saveTasks()
     }

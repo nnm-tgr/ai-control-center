@@ -965,15 +965,12 @@ func syncParent(id: UUID, in tasks: inout [TaskItem]) {
           let idx = tasks.firstIndex(where: { $0.id == id })
     else { return }
 
-    let avg      = children.map(\.progress).reduce(0, +) / children.count
-    let allDone  = children.allSatisfy(\.isDone)
-    let anyActive = children.contains { $0.status == .inProgress || $0.status == .inReview }
-    let allOnHold = children.allSatisfy { $0.status == .onHold }
+    let avg = children.map(\.progress).reduce(0, +) / children.count
 
     tasks[idx].progress = avg
-    tasks[idx].status   = allDone    ? .done       :
-                          anyActive  ? .inProgress :
-                          allOnHold  ? .onHold     : .todo
+    tasks[idx].status   = avg == 100 ? .done       :
+                          avg >  0   ? .inProgress :
+                                       .todo
 }
 
 // ──────────────────────────────────────────
@@ -1019,7 +1016,7 @@ check(parent25.status == .inProgress,
 // ──────────────────────────────────────────
 print("\n=== Test 26: syncParent — status derivation rules ===")
 
-// All onHold → parent onHold
+// avg > 0 and < 100 → inProgress (child status irrelevant)
 let parentID26a = UUID()
 var tasks26a: [TaskItem] = [
     TaskItem(id: parentID26a, title: "Parent"),
@@ -1027,10 +1024,11 @@ var tasks26a: [TaskItem] = [
     TaskItem(title: "C2", status: .onHold, parentID: parentID26a, progress: 30),
 ]
 syncParent(id: parentID26a, in: &tasks26a)
-check(tasks26a.first(where: { $0.id == parentID26a })!.status == .onHold,
-      "all children onHold → parent = .onHold")
+let p26a = tasks26a.first(where: { $0.id == parentID26a })!
+check(p26a.status   == .inProgress, "avg=25 (0<p<100) → parent = .inProgress")
+check(p26a.progress == 25,          "onHold children avg = 25 (got \(p26a.progress))")
 
-// Mix of todo and done (not all done) → parent todo
+// 0% + 100% mix → avg=50 → inProgress
 let parentID26b = UUID()
 var tasks26b: [TaskItem] = [
     TaskItem(id: parentID26b, title: "Parent"),
@@ -1039,19 +1037,19 @@ var tasks26b: [TaskItem] = [
 ]
 syncParent(id: parentID26b, in: &tasks26b)
 let p26b = tasks26b.first(where: { $0.id == parentID26b })!
-check(p26b.status   == .todo, "done+todo mix → parent = .todo")
-check(p26b.progress == 50,    "done+todo mix → parent progress = 50 (got \(p26b.progress))")
+check(p26b.status   == .inProgress, "avg=50 → parent = .inProgress")
+check(p26b.progress == 50,          "done+todo mix → parent progress = 50 (got \(p26b.progress))")
 
-// inReview child → parent inProgress
+// all children at 0% → parent todo
 let parentID26c = UUID()
 var tasks26c: [TaskItem] = [
     TaskItem(id: parentID26c, title: "Parent"),
-    TaskItem(title: "C1", status: .inReview, parentID: parentID26c, progress: 80),
+    TaskItem(title: "C1", status: .todo, parentID: parentID26c, progress: 0),
     TaskItem(title: "C2", status: .todo, parentID: parentID26c, progress: 0),
 ]
 syncParent(id: parentID26c, in: &tasks26c)
-check(tasks26c.first(where: { $0.id == parentID26c })!.status == .inProgress,
-      "inReview child → parent = .inProgress")
+check(tasks26c.first(where: { $0.id == parentID26c })!.status == .todo,
+      "all children 0% → parent = .todo")
 
 // ──────────────────────────────────────────
 // Test 27: syncParent — no-op when children list is empty
@@ -1087,8 +1085,8 @@ if let idx = tasks28.firstIndex(where: { $0.title == "Sub 1" }) {
 }
 syncParent(id: parentID28, in: &tasks28)
 let p28a = tasks28.first(where: { $0.id == parentID28 })!
-check(p28a.progress == 50,   "1/2 done → parent progress = 50 (got \(p28a.progress))")
-check(p28a.status   == .todo, "1/2 done → parent status = .todo")
+check(p28a.progress == 50,         "1/2 done → parent progress = 50 (got \(p28a.progress))")
+check(p28a.status   == .inProgress, "1/2 done → parent status = .inProgress")
 
 // Toggle Sub 2 → done
 if let idx = tasks28.firstIndex(where: { $0.title == "Sub 2" }) {
@@ -1107,8 +1105,8 @@ if let idx = tasks28.firstIndex(where: { $0.title == "Sub 1" }) {
 }
 syncParent(id: parentID28, in: &tasks28)
 let p28c = tasks28.first(where: { $0.id == parentID28 })!
-check(p28c.progress == 50,   "revert Sub1 → parent progress back to 50 (got \(p28c.progress))")
-check(p28c.status   == .todo, "revert Sub1 → parent status back to .todo")
+check(p28c.progress == 50,         "revert Sub1 → parent progress back to 50 (got \(p28c.progress))")
+check(p28c.status   == .inProgress, "revert Sub1 → parent status = .inProgress (avg=50)")
 
 // ──────────────────────────────────────────
 // Summary
