@@ -860,6 +860,101 @@ check(capturedSubtask?.id == subtaskSample.id, "subtask onEdit passes correct id
 check(capturedSubtask?.parentID == callbackSample.id, "subtask parentID preserved through callback")
 
 // ──────────────────────────────────────────
+// Test 21: toggleDone full cycle (todo → done → todo)
+// Root cause for instability: when transitioning done→todo,
+// progress must reset to 0; without this reset the UI shows
+// progress=100 while status=todo, causing visual confusion and
+// misread "already done" clicks.
+// ──────────────────────────────────────────
+print("\n=== Test 21: toggleDone full cycle — todo→done→todo progress reset ===")
+
+func toggleDone(id: UUID, in tasks: inout [TaskItem]) {
+    guard let idx = tasks.firstIndex(where: { $0.id == id }) else { return }
+    if tasks[idx].isDone {
+        tasks[idx].status = .todo
+        tasks[idx].progress = 0
+        tasks[idx].updatedAt = .now
+    } else {
+        tasks[idx].status = .done
+        tasks[idx].progress = 100
+        tasks[idx].updatedAt = .now
+    }
+}
+
+var cycleTask = [TaskItem(title: "Cycle task", progress: 0)]
+let cycleID = cycleTask[0].id
+
+// Initial state
+check(cycleTask[0].status == .todo,     "initial status is .todo")
+check(cycleTask[0].progress == 0,       "initial progress is 0")
+check(!cycleTask[0].isDone,             "initial isDone is false")
+
+// todo → done
+toggleDone(id: cycleID, in: &cycleTask)
+check(cycleTask[0].status == .done,     "after 1st toggle: status = .done")
+check(cycleTask[0].progress == 100,     "after 1st toggle: progress = 100")
+check(cycleTask[0].isDone,              "after 1st toggle: isDone = true")
+
+// done → todo (progress MUST reset)
+toggleDone(id: cycleID, in: &cycleTask)
+check(cycleTask[0].status == .todo,     "after 2nd toggle: status = .todo")
+check(cycleTask[0].progress == 0,       "after 2nd toggle: progress reset to 0")
+check(!cycleTask[0].isDone,             "after 2nd toggle: isDone = false")
+
+// todo → done again (should still work after reset)
+toggleDone(id: cycleID, in: &cycleTask)
+check(cycleTask[0].status == .done,     "after 3rd toggle: status = .done")
+check(cycleTask[0].progress == 100,     "after 3rd toggle: progress = 100")
+
+// ──────────────────────────────────────────
+// Test 22: toggleDone from non-todo statuses
+// Ensures toggle always lands in a clean state regardless of
+// what status the task had before being marked done.
+// ──────────────────────────────────────────
+print("\n=== Test 22: toggleDone from non-todo starting statuses ===")
+
+// inProgress(50%) → done → todo(0%)
+var inProgressTask = [TaskItem(title: "In progress", status: .inProgress, progress: 50)]
+let inProgressID = inProgressTask[0].id
+
+toggleDone(id: inProgressID, in: &inProgressTask)
+check(inProgressTask[0].status == .done,   "inProgress → done: status = .done")
+check(inProgressTask[0].progress == 100,   "inProgress → done: progress = 100")
+
+toggleDone(id: inProgressID, in: &inProgressTask)
+check(inProgressTask[0].status == .todo,   "done → todo: status = .todo")
+check(inProgressTask[0].progress == 0,     "done → todo: progress reset to 0 (was 100)")
+
+// onHold(30%) → done → todo(0%)
+var onHoldTask = [TaskItem(title: "On hold", status: .onHold, progress: 30)]
+let onHoldID = onHoldTask[0].id
+
+toggleDone(id: onHoldID, in: &onHoldTask)
+check(onHoldTask[0].isDone,                "onHold → done: isDone = true")
+check(onHoldTask[0].progress == 100,       "onHold → done: progress = 100")
+
+toggleDone(id: onHoldID, in: &onHoldTask)
+check(!onHoldTask[0].isDone,               "done → todo: isDone = false")
+check(onHoldTask[0].progress == 0,         "done → todo: progress reset to 0 (was 30)")
+
+// ──────────────────────────────────────────
+// Test 23: toggleDone idempotency on wrong id
+// Calling toggleDone on a non-existent ID should be a no-op.
+// ──────────────────────────────────────────
+print("\n=== Test 23: toggleDone no-op for unknown id ===")
+
+var noopTasks = [TaskItem(title: "Safe task", progress: 40)]
+let unknownID = UUID()
+let beforeStatus = noopTasks[0].status
+let beforeProgress = noopTasks[0].progress
+
+toggleDone(id: unknownID, in: &noopTasks)
+
+check(noopTasks[0].status == beforeStatus,     "unknown id: status unchanged")
+check(noopTasks[0].progress == beforeProgress, "unknown id: progress unchanged")
+check(noopTasks.count == 1,                    "unknown id: task list unchanged")
+
+// ──────────────────────────────────────────
 // Summary
 // ──────────────────────────────────────────
 print("\n=== Results ===")
