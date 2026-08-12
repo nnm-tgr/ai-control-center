@@ -31,6 +31,10 @@ final class AppState {
 
     var pendingApprovals: [ToolApprovalRequest] { toolApproval.pendingApprovals }
 
+    // MARK: - Tasks
+
+    let taskStore = TaskStore()
+
     // MARK: - Services
 
     private let scanner = ProjectScannerService()
@@ -45,11 +49,66 @@ final class AppState {
         self.settings = settingsStore.settings
     }
 
+    // MARK: - Project Persistence
+
+    private static let projectsURL: URL? = {
+        guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        else { return nil }
+        let dir = base.appendingPathComponent("AIControlCenter", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("projects.json")
+    }()
+
+    private struct PersistedProject: Codable {
+        let id: UUID
+        var name: String
+        let rootURL: URL
+        let isGitRepository: Bool
+        var discoveredAt: Date
+    }
+
+    private func loadPersistedProjects() {
+        guard let url = Self.projectsURL,
+              let data = try? Data(contentsOf: url),
+              let persisted = try? JSONDecoder().decode([PersistedProject].self, from: data)
+        else { return }
+
+        // Deduplicate by rootURL: keep earliest discoveredAt.
+        // Duplicates arise when projectID used a non-deterministic hash (Swift.Hasher)
+        // that produced a different UUID per process launch.
+        var seen: [URL: PersistedProject] = [:]
+        for p in persisted {
+            let key = p.rootURL.standardizedFileURL
+            if seen[key] == nil || p.discoveredAt < seen[key]!.discoveredAt {
+                seen[key] = p
+            }
+        }
+
+        projects = seen.values.map { p -> Project in
+            // Re-derive the ID with the now-stable hash so it matches future scans.
+            let stableID = FileWatcherService.projectID(for: p.rootURL)
+            return Project(id: stableID, name: p.name, rootURL: p.rootURL,
+                           isGitRepository: p.isGitRepository, discoveredAt: p.discoveredAt,
+                           lastSeenAt: p.discoveredAt, isReachable: false)
+        }.sorted { $0.name < $1.name }
+    }
+
+    private func saveProjects() {
+        guard let url = Self.projectsURL else { return }
+        let persisted = projects.map {
+            PersistedProject(id: $0.id, name: $0.name, rootURL: $0.rootURL,
+                             isGitRepository: $0.isGitRepository, discoveredAt: $0.discoveredAt)
+        }
+        guard let data = try? JSONEncoder().encode(persisted) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
     // MARK: - Lifecycle
 
     func start() async {
         // 保存済みブックマークを有効化してからスキャン・監視を開始する
         settingsStore.activateAllBookmarks()
+        loadPersistedProjects()
         await NotificationService.shared.requestAuthorization()
         await refresh()
         startWatcher()
@@ -157,6 +216,7 @@ final class AppState {
         }
 
         projects = Array(existing.values).sorted { $0.name < $1.name }
+        saveProjects()
     }
 
     // MARK: - Notifications

@@ -18,6 +18,10 @@ struct AgentDetailView: View {
                 headerSection
                 Divider().padding(.vertical, 12)
                 progressSection
+                if viewModel.hasProjectTasks(in: appState.taskStore) {
+                    Divider().padding(.vertical, 12)
+                    taskSummarySection
+                }
                 Divider().padding(.vertical, 12)
                 activitySection
             }
@@ -31,31 +35,39 @@ struct AgentDetailView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    Task { await openInTerminal() }
+                    Task { await jumpToTerminal() }
                 } label: {
-                    Label("Open in Terminal", systemImage: "terminal")
+                    Label("Jump to Terminal", systemImage: "terminal")
                 }
-                .help("Open project directory in terminal")
+                .help("Jump to the terminal session running in this project directory")
             }
         }
     }
 
-    private func openInTerminal() async {
+    private func jumpToTerminal() async {
         do {
-            let banner = try await terminalService.open(
-                workingDirectory: project.rootURL,
+            try await terminalService.jump(
+                to: project.rootURL,
                 providerType: appState.settings.preferredTerminal
             )
-            if let banner {
-                appState.pendingBanners.append(banner)
-            }
+        } catch AppError.terminal(.sessionNotFound) {
+            appState.pendingBanners.append(BannerMessage(
+                message: "No terminal session found for \(project.rootURL.lastPathComponent)",
+                level: .warning,
+                autoDismissAfter: 5
+            ))
+        } catch AppError.terminal(.automationPermissionDenied(let name)) {
+            appState.pendingBanners.append(BannerMessage(
+                message: "Automation permission denied for \(name). Open System Settings > Privacy & Security > Automation.",
+                level: .error,
+                autoDismissAfter: 10
+            ))
         } catch {
-            let banner = BannerMessage(
-                message: "Could not open terminal: \(error.localizedDescription)",
+            appState.pendingBanners.append(BannerMessage(
+                message: "Could not switch to terminal: \(error.localizedDescription)",
                 level: .error,
                 autoDismissAfter: 8
-            )
-            appState.pendingBanners.append(banner)
+            ))
         }
     }
 
@@ -168,6 +180,15 @@ struct AgentDetailView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Task Summary
+
+    private var taskSummarySection: some View {
+        TaskSummaryView(
+            projectURL: project.rootURL,
+            taskStore: appState.taskStore
+        )
     }
 
     // MARK: - Activity History

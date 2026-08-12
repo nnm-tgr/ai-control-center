@@ -3,13 +3,21 @@ import SwiftUI
 struct AgentRowView: View {
     let project: Project
     let isSelected: Bool
+    var indent: CGFloat = 0
+    var hasMemo: Bool = false
+    var isMemoOpen: Bool = false
+    var onMemoToggle: (() -> Void)? = nil
 
     @State private var isHovered = false
+    @State private var isMemoButtonHovered = false
 
     private var agent: Agent? { project.primaryAgent }
 
     var body: some View {
         HStack(spacing: 0) {
+            if indent > 0 {
+                Color.clear.frame(width: indent)
+            }
             // Status dot
             Circle()
                 .fill(project.aggregatedStatus.color)
@@ -60,6 +68,24 @@ struct AgentRowView: View {
         .frame(height: 40)
         .background(rowBackground)
         .onHover { isHovered = $0 }
+        .overlay(alignment: .trailing) { memoButton }
+    }
+
+    @ViewBuilder
+    private var memoButton: some View {
+        if let toggle = onMemoToggle {
+            Button(action: toggle) {
+                Image(systemName: "note.text")
+                    .font(.caption)
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(isMemoOpen ? Color.accentColor : Color.primary)
+            }
+            .buttonStyle(.plain)
+            .padding(.trailing, 12)
+            .onHover { isMemoButtonHovered = $0 }
+            .opacity(isMemoButtonHovered || isMemoOpen || hasMemo || isHovered ? 1 : 0)
+            .animation(.easeOut(duration: 0.1), value: isMemoButtonHovered || isHovered)
+        }
     }
 
     @ViewBuilder
