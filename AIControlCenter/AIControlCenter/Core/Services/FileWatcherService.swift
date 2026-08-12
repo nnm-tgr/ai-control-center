@@ -12,6 +12,23 @@ final class FileWatcherService {
     private(set) var agentByProjectID: [UUID: Agent] = [:]
     private(set) var lastError: AppError?
 
+    // MARK: - Event Stream
+
+    enum WatcherEvent: Sendable {
+        case agentUpdated(projectID: UUID, agent: Agent)
+        case error(AppError)
+    }
+
+    private var eventContinuation: AsyncStream<WatcherEvent>.Continuation?
+
+    /// AppState が for-await で消費するイベントストリーム。
+    /// start() 前に取得しておくこと。stop() で終了する。
+    func makeEventStream() -> AsyncStream<WatcherEvent> {
+        AsyncStream { continuation in
+            self.eventContinuation = continuation
+        }
+    }
+
     // MARK: - Dependencies
 
     private let parser = StatusParserService()
@@ -45,6 +62,8 @@ final class FileWatcherService {
         watchTask = nil
         activeStream?.stop()
         activeStream = nil
+        eventContinuation?.finish()
+        eventContinuation = nil
     }
 
     // MARK: - Event Handling
@@ -62,10 +81,14 @@ final class FileWatcherService {
             let agent = try parser.loadAgent(at: url, projectID: projectID, existing: existing)
             agentByProjectID[projectID] = agent
             lastError = nil
+            eventContinuation?.yield(.agentUpdated(projectID: projectID, agent: agent))
         } catch let error as AppError {
             lastError = error
+            eventContinuation?.yield(.error(error))
         } catch {
-            lastError = .statusParsing(.decodingFailed(url: url, underlying: error.localizedDescription))
+            let err = AppError.statusParsing(.decodingFailed(url: url, underlying: error.localizedDescription))
+            lastError = err
+            eventContinuation?.yield(.error(err))
         }
     }
 
