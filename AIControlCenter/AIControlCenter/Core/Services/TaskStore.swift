@@ -7,6 +7,8 @@ final class TaskStore {
     private(set) var tasks: [TaskItem] = []
     private(set) var taskGroups: [TaskGroup] = []
     private(set) var categories: [TaskCategory] = []
+    /// Persisted ordering of project-group keys for each parent task's expanded subtask accordion.
+    private(set) var childGroupOrders: [UUID: [String]] = [:]
 
     init() { load() }
 
@@ -20,9 +22,10 @@ final class TaskStore {
         return dir
     }()
 
-    private static var tasksURL:      URL? { storeDirectory?.appendingPathComponent("tasks.json") }
-    private static var groupsURL:     URL? { storeDirectory?.appendingPathComponent("task-groups.json") }
-    private static var categoriesURL: URL? { storeDirectory?.appendingPathComponent("task-categories.json") }
+    private static var tasksURL:           URL? { storeDirectory?.appendingPathComponent("tasks.json") }
+    private static var groupsURL:          URL? { storeDirectory?.appendingPathComponent("task-groups.json") }
+    private static var categoriesURL:      URL? { storeDirectory?.appendingPathComponent("task-categories.json") }
+    private static var childGroupOrderURL: URL? { storeDirectory?.appendingPathComponent("child-group-orders.json") }
 
     private func load() {
         if let url = Self.tasksURL,
@@ -39,6 +42,14 @@ final class TaskStore {
            let data = try? Data(contentsOf: url),
            let decoded = try? JSONDecoder().decode([TaskCategory].self, from: data) {
             categories = decoded
+        }
+        if let url = Self.childGroupOrderURL,
+           let data = try? Data(contentsOf: url),
+           let decoded = try? JSONDecoder().decode([String: [String]].self, from: data) {
+            childGroupOrders = Dictionary(uniqueKeysWithValues: decoded.compactMap { k, v in
+                guard let uuid = UUID(uuidString: k) else { return nil }
+                return (uuid, v)
+            })
         }
     }
 
@@ -58,6 +69,18 @@ final class TaskStore {
         guard let url = Self.categoriesURL,
               let data = try? JSONEncoder().encode(categories) else { return }
         try? data.write(to: url, options: .atomic)
+    }
+
+    private func saveChildGroupOrders() {
+        let stringKeyed = Dictionary(uniqueKeysWithValues: childGroupOrders.map { ($0.key.uuidString, $0.value) })
+        guard let url = Self.childGroupOrderURL,
+              let data = try? JSONEncoder().encode(stringKeyed) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    func setChildGroupOrder(parentID: UUID, order: [String]) {
+        childGroupOrders[parentID] = order
+        saveChildGroupOrders()
     }
 
     // MARK: - Task CRUD
