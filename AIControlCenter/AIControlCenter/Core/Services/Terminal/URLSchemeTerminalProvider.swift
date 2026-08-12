@@ -18,8 +18,16 @@ struct URLSchemeTerminalProvider: TerminalProvider {
 
     // MARK: - URL Schemes
 
+    // Characters that must not appear unencoded in a query-parameter value.
+    // .urlQueryAllowed keeps & = + # ; which are query delimiters, so we subtract them.
+    private static let queryValueAllowed: CharacterSet = {
+        var cs = CharacterSet.urlQueryAllowed
+        cs.remove(charactersIn: "&=+#;")
+        return cs
+    }()
+
     private func openURL(for type: TerminalProviderType, path: String) -> URL? {
-        guard let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+        guard let encoded = path.addingPercentEncoding(withAllowedCharacters: Self.queryValueAllowed) else {
             return nil
         }
         switch type {

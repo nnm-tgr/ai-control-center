@@ -34,6 +34,8 @@ struct ProjectScannerService: Sendable {
 
         // BFS キュー: (URL, 現在の深さ)
         var queue: [(url: URL, depth: Int)] = [(root, 0)]
+        // Visited set prevents symlink cycles from causing infinite loops.
+        var visited: Set<URL> = [root.standardizedFileURL]
 
         while !queue.isEmpty {
             let (current, depth) = queue.removeFirst()
@@ -50,9 +52,11 @@ struct ProjectScannerService: Sendable {
             // 深さ制限に達したらこれ以上降りない
             guard depth < maxDepth else { continue }
 
-            // サブディレクトリをキューに追加（除外リスト・隠しフォルダを除く）
+            // サブディレクトリをキューに追加（除外リスト・隠しフォルダ・シムリンクを除く）
             let children = subdirectories(of: current, excluding: excluded)
             for child in children {
+                let canonical = child.standardizedFileURL
+                guard visited.insert(canonical).inserted else { continue }
                 queue.append((child, depth + 1))
             }
         }
@@ -81,7 +85,7 @@ struct ProjectScannerService: Sendable {
     private func subdirectories(of url: URL, excluding excluded: Set<String>) -> [URL] {
         guard let contents = try? fileManager.contentsOfDirectory(
             at: url,
-            includingPropertiesForKeys: [.isDirectoryKey, .isHiddenKey],
+            includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey, .isHiddenKey],
             options: [.skipsPackageDescendants]
         ) else { return [] }
 
@@ -89,7 +93,9 @@ struct ProjectScannerService: Sendable {
             let name = child.lastPathComponent
             // 除外リストに含まれるもの、ドット始まりの隠しフォルダ（.git 等）は skip
             guard !excluded.contains(name), !name.hasPrefix(".") else { return false }
-            let values = try? child.resourceValues(forKeys: [.isDirectoryKey])
+            let values = try? child.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            // シムリンクは BFS から除外（トラバーサル攻撃と無限ループの防止）
+            guard values?.isSymbolicLink != true else { return false }
             return values?.isDirectory == true
         }
     }
