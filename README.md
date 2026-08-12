@@ -7,7 +7,7 @@
 ![Swift](https://img.shields.io/badge/Swift-6.0-orange?logo=swift)
 ![SwiftUI](https://img.shields.io/badge/UI-SwiftUI-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
-![Status](https://img.shields.io/badge/status-MVP%20in%20progress-yellow)
+![Status](https://img.shields.io/badge/status-MVP%20complete-brightgreen)
 
 ---
 
@@ -62,7 +62,7 @@ It is an **AI Development Operating System**.
 └─────────────────────────────────────────────────────┘
 ```
 
-A single, beautiful macOS app that gives you a mission-control view of your entire AI development ecosystem — across every project, every agent, every session.
+A single, native macOS app that gives you a mission-control view of your entire AI development ecosystem — across every project, every agent, every session.
 
 ---
 
@@ -85,7 +85,7 @@ flowchart LR
     end
 
     subgraph AI Control Center
-        W[File Watcher]
+        W[FSEventStream]
         P[Status Parser]
         D[Dashboard UI]
     end
@@ -108,10 +108,9 @@ This means:
 
 ## Features
 
-### MVP
+### Agent Dashboard
 
-#### Dashboard
-A single-screen view of all active AI agents.
+A real-time view of all active AI agents across all watched projects.
 
 | Column | Description |
 |--------|-------------|
@@ -135,17 +134,22 @@ A single-screen view of all active AI agents.
 
 Designed to be scannable at a glance. No reading required.
 
-#### Notifications
-Native macOS notifications triggered by meaningful state changes:
+### Notifications
 
-- `Review Finished` — Agent completed a code review
-- `Tests Passed` — Test suite ran successfully
-- `Permission Required` — Agent needs your approval to proceed
-- `Command Failed` — An execution error occurred
-- `Task Completed` — Agent finished its assigned work
+Native macOS notifications triggered by meaningful state transitions. Notification level is derived from the new state:
 
-#### Activity Log
-A per-agent timeline showing the history of state transitions:
+| Trigger | Level |
+|---------|-------|
+| Agent error | Critical |
+| Waiting for user input | High |
+| Task completed | Normal |
+| Other transitions | Low (silent) |
+
+Spurious notifications are suppressed — for example, `thinking → runningCommand` (already active) does not fire.
+
+### Agent Detail & Activity Log
+
+Click any agent to open its detail view: a per-agent timeline showing the full history of state transitions with timestamps.
 
 ```
 14:05  ●  Running Tests
@@ -154,70 +158,46 @@ A per-agent timeline showing the history of state transitions:
 14:20  ●  Completed
 ```
 
-#### Terminal Jump
-Click any agent row to immediately switch focus to its terminal window.
+### Terminal Jump
 
-### Roadmap Features
+Click any agent row to immediately switch focus to its terminal window — supporting Terminal.app, iTerm2, and Warp via AppleScript and URL scheme providers.
 
-#### .ai/ Project Integration
-Standardized status contract for any project:
+### Tool Approval
 
-```json
-// .ai/agent-status.json
-{
-  "agent": "claude-code",
-  "status": "thinking",
-  "task": "Refactoring AuthService",
-  "progress": 0.6,
-  "branch": "feature/auth-refactor",
-  "started_at": "2026-07-28T09:15:00Z",
-  "updated_at": "2026-07-28T09:42:00Z"
-}
-```
+When an agent requests permission to run a tool, a native approval overlay appears in the dashboard. Approve or deny without leaving the app. Approval decisions are written back to the project's `.ai/settings.json` for the agent to pick up.
 
-#### Workflow Visualization
-See which phase of development is active:
+### Task Management
 
-```
-[ Spec ] → [ Plan ] → [ Coding ] → [ Review ] → [ Testing ] → [ Done ]
-                           ▲
-                      currently here
-```
+A built-in task tracker, scoped to individual projects or shared globally across all watched roots.
 
-#### Progress Tracking
-Feature-level progress bars:
+**Task properties:**
 
-```
-Auth Refactor     ████████░░  80%
-API Integration   ████░░░░░░  40%
-Test Coverage     ██░░░░░░░░  20%
-```
+| Field | Description |
+|-------|-------------|
+| **Title** | What needs to be done |
+| **Status** | To Do / In Progress / In Review / On Hold / Done |
+| **Priority** | Low / Medium / High / Urgent |
+| **Scope** | Project-specific, group, or global |
+| **Progress** | 0–100% (auto-derived from subtasks) |
+| **Due date** | Optional deadline |
+| **Category** | Color-coded label |
+| **Notes** | Multiple rich-text notes per task |
+| **Subtasks** | One level of child tasks with auto-rollup progress |
 
-#### Git Integration
-Real-time repository status alongside each agent:
+**Task groups** allow tasks to be organized into named, color-coded buckets independent of any single project.
 
-- Current branch
-- Commits ahead / behind origin
-- Changed file count
-- Uncommitted work indicator
+**Auto-rollup:** completing or progressing subtasks automatically updates the parent task's progress and status.
 
-#### Worktree Support
-Multiple branches of the same repository displayed side by side — essential for parallel feature development.
+### Menu Bar
 
-#### Resource Monitor
-CPU and memory usage per AI process, so you know when an agent is thrashing your machine.
+A compact menu bar item gives instant access to the dashboard and key agent states without bringing the full window to the foreground.
 
-#### Timeline View
-A Gantt-style history of agent activity across all projects — useful for retrospectives and understanding where time was spent.
+### Settings
 
-#### Multi-Agent Commands
-Broadcast instructions across all running agents:
-
-```
-⌘ Stop All Agents
-⌘ Start Review Phase
-⌘ Pull & Sync All
-```
+- Add and remove watched root directories (sandbox-aware bookmark persistence)
+- Configure excluded directory names for the scanner
+- Choose terminal provider (Terminal, iTerm2, Warp, Ghostty)
+- Configure tool approval behavior and timeout
 
 ---
 
@@ -227,49 +207,51 @@ Broadcast instructions across all running agents:
 graph TB
     subgraph macOS App — AI Control Center
         direction TB
-        UI[SwiftUI Dashboard]
-        VM[AgentViewModel\nObservableObject]
-        WM[WatcherManager\nFSEventStream]
-        NM[NotificationManager\nUNUserNotificationCenter]
-        PM[ProjectManager]
+        UI[SwiftUI Views]
+        AS[AppState\n@Observable @MainActor]
+        TS[TaskStore\n@Observable @MainActor]
+        FW[FileWatcherService\nAsyncStream push]
+        PS[ProjectScannerService]
+        NS[NotificationService\nUNUserNotificationCenter]
+        TA[ToolApprovalService]
+        SS[SettingsStore]
 
-        UI <-->|@Published| VM
-        VM --> WM
-        VM --> NM
-        VM --> PM
+        UI <-->|observe| AS
+        UI <-->|observe| TS
+        AS --> FW
+        AS --> PS
+        AS --> NS
+        AS --> TA
+        AS --> SS
+    end
+
+    subgraph Infrastructure
+        AFS[AsyncFSEventStream]
+        FSW[FSEventStreamWrapper\nC-level callback]
+        AFS --> FSW
+        FW --> AFS
     end
 
     subgraph File System
-        direction TB
-        P1[~/projects/clinic/.ai/agent-status.json]
-        P2[~/projects/flutter-app/.ai/agent-status.json]
-        P3[~/projects/aws/.ai/agent-status.json]
+        P1[project-a/.ai/agent-status.json]
+        P2[project-b/.ai/agent-status.json]
     end
 
-    WM -->|FSEventStream| P1
-    WM -->|FSEventStream| P2
-    WM -->|FSEventStream| P3
-
-    subgraph External Agents
-        CC[Claude Code]
-        CU[Cursor Agent]
-        OA[OpenAI Agent]
-    end
-
-    CC -->|writes| P1
-    CU -->|writes| P2
-    OA -->|writes| P3
+    FSW -->|FSEventStream| P1
+    FSW -->|FSEventStream| P2
 ```
 
 ### Key Design Decisions
 
 | Decision | Rationale |
 |----------|-----------|
-| **SwiftUI + macOS native** | Performance, look & feel, Apple HIG compliance, no Electron overhead |
+| **SwiftUI + macOS native** | Performance, Apple HIG compliance, no Electron overhead |
+| **Swift `@Observable` + `@MainActor`** | Swift 6 native observation; no ObservableObject or Combine |
+| **`AsyncStream` push model** | `FileWatcherService` emits `WatcherEvent` values; `AppState` consumes them in a stored `Task<Void, Never>` — no polling, no memory leaks |
 | **FSEventStream** for file watching | Apple's recommended low-level API, sub-millisecond latency, battery efficient |
 | **JSON status files** as the integration contract | Decoupled from any specific agent implementation |
 | **No terminal scraping** | Terminal output formats are unstable and agent-specific |
-| **Observable / Combine** for state | Native reactive patterns, no third-party reactive library needed |
+| **O(1) task lookup** | `TaskStore` maintains a `[UUID: Int]` index over the tasks array; CRUD is index-based |
 
 ---
 
@@ -282,45 +264,87 @@ ai-control-center/
 │
 ├── AIControlCenter/
 │   ├── App/
-│   │   ├── AIControlCenterApp.swift       # Entry point
-│   │   └── AppDelegate.swift              # NSApp lifecycle
+│   │   ├── AIControlCenterApp.swift        # Entry point
+│   │   └── AppDelegate.swift               # NSApp lifecycle
 │   │
 │   ├── Dashboard/
-│   │   ├── DashboardView.swift            # Main list view
-│   │   ├── AgentRowView.swift             # Single agent row
-│   │   ├── StatusBadgeView.swift          # Color-coded status pill
-│   │   └── DashboardViewModel.swift       # Aggregated state
+│   │   ├── DashboardView.swift             # Main project list
+│   │   ├── DashboardViewModel.swift        # Filter / sort logic
+│   │   ├── ProjectGroupRowView.swift       # Expandable project row
+│   │   ├── AgentRowView.swift              # Single agent row
+│   │   ├── StatusBadgeView.swift           # Color-coded status pill
+│   │   ├── ElapsedTimeView.swift           # Live elapsed timer
+│   │   ├── ApprovalOverlayView.swift       # Tool approval UI
+│   │   └── BannerOverlayView.swift         # Transient notification banners
 │   │
 │   ├── Detail/
-│   │   ├── AgentDetailView.swift          # Activity log + detail
-│   │   └── ActivityTimelineView.swift     # Timeline component
+│   │   ├── AgentDetailView.swift           # Activity log + agent info
+│   │   ├── AgentDetailViewModel.swift
+│   │   └── ActivityRowView.swift           # Single timeline entry
 │   │
-│   ├── Core/
-│   │   ├── Models/
-│   │   │   ├── Agent.swift                # Agent domain model
-│   │   │   ├── AgentStatus.swift          # Status enum + colors
-│   │   │   ├── AgentStatusFile.swift      # Decodable JSON contract
-│   │   │   └── Project.swift              # Project domain model
-│   │   │
-│   │   ├── Services/
-│   │   │   ├── FileWatcherService.swift   # FSEventStream wrapper
-│   │   │   ├── ProjectScanner.swift       # Discovers .ai/ dirs
-│   │   │   ├── StatusParser.swift         # JSON → Agent model
-│   │   │   └── NotificationService.swift  # UNUserNotification
-│   │   │
-│   │   └── Extensions/
-│   │       ├── Color+Status.swift
-│   │       └── Date+Elapsed.swift
+│   ├── Tasks/
+│   │   ├── TaskSectionView.swift           # Scoped task list
+│   │   ├── TaskRowView.swift               # Single task row
+│   │   ├── TaskDetailView.swift            # Full task detail + subtasks
+│   │   ├── TaskSummaryView.swift           # Progress summary widget
+│   │   ├── TaskStatusIndicatorView.swift   # Status icon
+│   │   ├── AddEditTaskSheet.swift          # Create / edit sheet
+│   │   └── NoteEditorView.swift            # Per-task note editor
+│   │
+│   ├── MenuBar/
+│   │   └── MenuBarView.swift               # Menu bar popover
 │   │
 │   ├── Settings/
-│   │   ├── SettingsView.swift
-│   │   └── SettingsViewModel.swift
+│   │   └── SettingsView.swift
 │   │
-│   └── Resources/
-│       ├── Assets.xcassets/
-│       └── Info.plist
+│   └── Core/
+│       ├── Models/
+│       │   ├── Agent.swift                 # Agent domain model
+│       │   ├── AgentStatus.swift           # Status enum + display
+│       │   ├── AgentStatusFile.swift       # Decodable JSON contract
+│       │   ├── AgentType.swift
+│       │   ├── AppError.swift              # Typed error hierarchy
+│       │   ├── AppNotification.swift
+│       │   ├── GitStatus.swift
+│       │   ├── Project.swift               # Project domain model
+│       │   ├── Settings.swift
+│       │   ├── SettingsStore.swift         # Bookmark-aware persistence
+│       │   ├── TaskItem.swift              # Task + subtask + note models
+│       │   ├── TerminalProviderType.swift
+│       │   ├── ToolApprovalRequest.swift
+│       │   └── WorkflowPhase.swift
+│       │
+│       ├── Services/
+│       │   ├── FileWatcherService.swift    # FSEvent → WatcherEvent stream
+│       │   ├── ProjectScannerService.swift # Discovers .ai/ dirs
+│       │   ├── StatusParserService.swift   # JSON → Agent model
+│       │   ├── NotificationService.swift   # UNUserNotificationCenter
+│       │   ├── TaskStore.swift             # Task CRUD + O(1) index
+│       │   ├── ToolApprovalService.swift
+│       │   └── Terminal/
+│       │       ├── TerminalService.swift
+│       │       ├── TerminalProvider.swift
+│       │       ├── AppleScriptTerminalProvider.swift
+│       │       ├── URLSchemeTerminalProvider.swift
+│       │       └── FallbackTerminalJump.swift
+│       │
+│       ├── Infrastructure/
+│       │   ├── AsyncFSEventStream.swift    # AsyncStream<URL> adapter
+│       │   └── FSEventStreamWrapper.swift  # C-level FSEventStream bridge
+│       │
+│       ├── State/
+│       │   └── AppState.swift              # Single source of truth
+│       │
+│       └── Extensions/
+│           ├── Color+AgentStatus.swift
+│           ├── Color+TaskPriority.swift
+│           └── Color+TaskStatus.swift
 │
-├── .ai/                                   # This project's own status
+├── tests/
+│   ├── test_task_store.swift               # TaskStore unit tests
+│   └── test_notification_rules.swift       # NotificationRule unit tests
+│
+├── .ai/                                    # This project's own status
 │   └── agent-status.json
 │
 └── README.md
@@ -362,11 +386,11 @@ This contract is intentionally minimal. Fields are optional beyond `agent` and `
 
 ---
 
-## Supported Agents (Planned)
+## Supported Agents
 
 | Agent | Status |
 |-------|--------|
-| Claude Code | MVP target |
+| Claude Code | Supported |
 | Cursor Agent | Planned |
 | OpenAI Codex / GPT-4 CLI | Planned |
 | Gemini CLI | Planned |
@@ -393,6 +417,18 @@ open AIControlCenter.xcodeproj
 
 Press `⌘R` to build and run.
 
+### Running Tests
+
+Standalone test scripts require no Xcode test target:
+
+```bash
+# Task store logic
+swift tests/test_task_store.swift
+
+# Notification rule logic
+swift tests/test_notification_rules.swift
+```
+
 ### Adding a Test Project
 
 To see the dashboard in action during development, create a mock status file:
@@ -412,7 +448,7 @@ cat > ~/projects/my-project/.ai/agent-status.json << 'EOF'
 EOF
 ```
 
-AI Control Center will detect it automatically.
+Add `~/projects/my-project` as a watched root in Settings. AI Control Center will detect the agent automatically.
 
 ---
 
@@ -423,45 +459,48 @@ gantt
     title AI Control Center Roadmap
     dateFormat  YYYY-MM
     section MVP
-    Core FSEventStream watcher     :done,    2026-07, 2026-08
-    Agent status JSON contract     :done,    2026-07, 2026-08
-    Dashboard list view            :active,  2026-07, 2026-08
-    Status color coding            :active,  2026-07, 2026-08
-    macOS notifications            :         2026-08, 2026-09
-    Activity log                   :         2026-08, 2026-09
-    Terminal jump                  :         2026-08, 2026-09
+    FSEventStream watcher + AsyncStream     :done,    2026-07, 2026-08
+    Agent status JSON contract              :done,    2026-07, 2026-08
+    Dashboard with real-time status         :done,    2026-07, 2026-08
+    macOS notifications (smart filtering)   :done,    2026-07, 2026-08
+    Agent detail & activity log             :done,    2026-07, 2026-08
+    Terminal jump (Terminal/iTerm2/Warp)    :done,    2026-07, 2026-08
+    Tool approval workflow                  :done,    2026-07, 2026-08
+    Task management (project + global)      :done,    2026-07, 2026-08
+    Menu bar view                           :done,    2026-07, 2026-08
 
-    section v1.1 — Git
-    Git status integration         :         2026-09, 2026-10
-    Branch + ahead/behind display  :         2026-09, 2026-10
-    Worktree support               :         2026-09, 2026-10
+    section v1.1 — Polish
+    Error display UI                        :         2026-09, 2026-10
+    Deep subtask data model (2+ levels)     :         2026-09, 2026-10
+    Git status integration                  :         2026-09, 2026-10
+    Worktree support                        :         2026-09, 2026-10
 
     section v1.2 — Workflow
-    Workflow phase display         :         2026-10, 2026-11
-    Progress bar per feature       :         2026-10, 2026-11
-    Timeline view                  :         2026-10, 2026-11
+    Workflow phase display                  :         2026-10, 2026-11
+    Progress bar per feature                :         2026-10, 2026-11
+    Timeline view (Gantt-style)             :         2026-10, 2026-11
 
     section v2.0 — Multi Agent
-    CPU/Memory per agent           :         2026-11, 2027-01
-    Multi-agent broadcast commands :         2026-11, 2027-01
-    Cursor / OpenAI agent support  :         2026-11, 2027-01
-    Claude Code hook integration   :         2026-11, 2027-01
+    CPU/Memory per agent                    :         2026-11, 2027-01
+    Multi-agent broadcast commands          :         2026-11, 2027-01
+    Cursor / OpenAI agent support           :         2026-11, 2027-01
+    Claude Code hook integration            :         2026-11, 2027-01
 ```
 
 ### Milestone Summary
 
 | Version | Theme | Key Deliverable |
 |---------|-------|-----------------|
-| **MVP** | Visibility | See all agents, status at a glance |
-| **v1.1** | Context | Git branch, changes, worktree |
-| **v1.2** | Progress | Workflow phase, feature progress |
-| **v2.0** | Control | Multi-agent commands, resource usage |
+| **MVP** | Visibility + Task tracking | Real-time agent dashboard, terminal jump, tool approval, task management |
+| **v1.1** | Polish + Context | Error UI, git branch display, worktree support |
+| **v1.2** | Workflow | Phase display, feature progress bars, timeline |
+| **v2.0** | Control | Multi-agent commands, resource usage, broader agent support |
 
 ---
 
 ## Contributing
 
-This project is in early MVP stage. Contributions are welcome, particularly:
+Contributions are welcome, particularly:
 
 - **Agent integrations** — If you write a hook or adapter for a new agent, please open a PR
 - **Status contract feedback** — Thoughts on the `.ai/agent-status.json` schema

@@ -10,6 +10,13 @@ final class TaskStore {
     /// Persisted ordering of project-group keys for each parent task's expanded subtask accordion.
     private(set) var childGroupOrders: [UUID: [String]] = [:]
 
+    /// Surfaces write failures for consumers (e.g. AppState.lastError).
+    private(set) var lastError: AppError?
+
+    // O(1) task lookup: maps task id → index in `tasks` array.
+    // Valid between mutations; rebuilt after any operation that shifts positions (delete, load).
+    private var taskIndex: [UUID: Int] = [:]
+
     init() { load() }
 
     // MARK: - Persistence
@@ -51,31 +58,58 @@ final class TaskStore {
                 return (uuid, v)
             })
         }
+        rebuildIndex()
     }
+
+    // MARK: - Index Management
+
+    private func rebuildIndex() {
+        taskIndex = Dictionary(uniqueKeysWithValues: tasks.enumerated().map { ($1.id, $0) })
+    }
+
+    private func taskIdx(for id: UUID) -> Int? { taskIndex[id] }
+
+    // MARK: - Persistence Helpers
 
     private func saveTasks() {
         guard let url = Self.tasksURL,
               let data = try? JSONEncoder().encode(tasks) else { return }
-        try? data.write(to: url, options: .atomic)
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            lastError = .persistence(.writeFailed(url: url, reason: error.localizedDescription))
+        }
     }
 
     private func saveGroups() {
         guard let url = Self.groupsURL,
               let data = try? JSONEncoder().encode(taskGroups) else { return }
-        try? data.write(to: url, options: .atomic)
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            lastError = .persistence(.writeFailed(url: url, reason: error.localizedDescription))
+        }
     }
 
     private func saveCategories() {
         guard let url = Self.categoriesURL,
               let data = try? JSONEncoder().encode(categories) else { return }
-        try? data.write(to: url, options: .atomic)
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            lastError = .persistence(.writeFailed(url: url, reason: error.localizedDescription))
+        }
     }
 
     private func saveChildGroupOrders() {
         let stringKeyed = Dictionary(uniqueKeysWithValues: childGroupOrders.map { ($0.key.uuidString, $0.value) })
         guard let url = Self.childGroupOrderURL,
               let data = try? JSONEncoder().encode(stringKeyed) else { return }
-        try? data.write(to: url, options: .atomic)
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            lastError = .persistence(.writeFailed(url: url, reason: error.localizedDescription))
+        }
     }
 
     func setChildGroupOrder(parentID: UUID, order: [String]) {
@@ -87,28 +121,31 @@ final class TaskStore {
 
     func addTask(_ task: TaskItem) {
         tasks.append(task)
+        taskIndex[task.id] = tasks.count - 1
         saveTasks()
         if let parentID = task.parentID { syncParent(id: parentID) }
     }
 
     func updateTask(_ task: TaskItem) {
-        guard let idx = tasks.firstIndex(where: { $0.id == task.id }) else { return }
+        guard let idx = taskIdx(for: task.id) else { return }
         var updated = task
         updated.updatedAt = .now
         tasks[idx] = updated
+        // Index position unchanged by in-place update
         saveTasks()
         if let parentID = task.parentID { syncParent(id: parentID) }
     }
 
     func deleteTask(id: UUID) {
-        let parentID = tasks.first(where: { $0.id == id })?.parentID
+        let parentID = taskIdx(for: id).map { tasks[$0].parentID } ?? nil
         tasks.removeAll { $0.id == id || $0.parentID == id }
+        rebuildIndex()
         saveTasks()
         if let parentID { syncParent(id: parentID) }
     }
 
     func toggleDone(id: UUID) {
-        guard let idx = tasks.firstIndex(where: { $0.id == id }) else { return }
+        guard let idx = taskIdx(for: id) else { return }
         let parentID = tasks[idx].parentID
         if tasks[idx].isDone {
             tasks[idx].status   = .todo
@@ -123,7 +160,7 @@ final class TaskStore {
     }
 
     func setStatus(id: UUID, status: TaskStatus) {
-        guard let idx = tasks.firstIndex(where: { $0.id == id }) else { return }
+        guard let idx = taskIdx(for: id) else { return }
         tasks[idx].status = status
         if status == .done { tasks[idx].progress = 100 }
         tasks[idx].updatedAt = .now
@@ -132,7 +169,7 @@ final class TaskStore {
     }
 
     func setProgress(id: UUID, progress: Int) {
-        guard let idx = tasks.firstIndex(where: { $0.id == id }) else { return }
+        guard let idx = taskIdx(for: id) else { return }
         tasks[idx].progress = min(max(progress, 0), 100)
         tasks[idx].updatedAt = .now
         saveTasks()
@@ -150,7 +187,7 @@ final class TaskStore {
     private func syncParent(id: UUID) {
         let children = tasks.filter { $0.parentID == id }
         guard !children.isEmpty,
-              let idx = tasks.firstIndex(where: { $0.id == id })
+              let idx = taskIdx(for: id)
         else { return }
 
         let avg = children.map(\.progress).reduce(0, +) / children.count
@@ -166,14 +203,14 @@ final class TaskStore {
     // MARK: - Note CRUD
 
     func addNote(to taskID: UUID, content: String) {
-        guard let idx = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        guard let idx = taskIdx(for: taskID) else { return }
         tasks[idx].notes.append(TaskNote(content: content))
         tasks[idx].updatedAt = .now
         saveTasks()
     }
 
     func updateNote(taskID: UUID, noteID: UUID, content: String) {
-        guard let taskIdx = tasks.firstIndex(where: { $0.id == taskID }),
+        guard let taskIdx = taskIdx(for: taskID),
               let noteIdx = tasks[taskIdx].notes.firstIndex(where: { $0.id == noteID })
         else { return }
         tasks[taskIdx].notes[noteIdx].content = content
@@ -183,9 +220,9 @@ final class TaskStore {
     }
 
     func deleteNote(taskID: UUID, noteID: UUID) {
-        guard let taskIdx = tasks.firstIndex(where: { $0.id == taskID }) else { return }
-        tasks[taskIdx].notes.removeAll { $0.id == noteID }
-        tasks[taskIdx].updatedAt = .now
+        guard let idx = taskIdx(for: taskID) else { return }
+        tasks[idx].notes.removeAll { $0.id == noteID }
+        tasks[idx].updatedAt = .now
         saveTasks()
     }
 

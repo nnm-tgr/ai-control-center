@@ -6,6 +6,7 @@ enum AppError: Error, LocalizedError, Sendable {
     case projectDiscovery(ProjectDiscoveryError)
     case terminal(TerminalError)
     case git(GitError)
+    case persistence(PersistenceError)
 
     enum FileWatcherError: Sendable {
         case watchFailed(url: URL, reason: String)
@@ -34,6 +35,10 @@ enum AppError: Error, LocalizedError, Sendable {
     enum GitError: Sendable {
         case notARepository(url: URL)
         case commandFailed(exitCode: Int32, stderr: String)
+    }
+
+    enum PersistenceError: Sendable {
+        case writeFailed(url: URL, reason: String)
     }
 
     var localizedDescription: String {
@@ -66,6 +71,8 @@ enum AppError: Error, LocalizedError, Sendable {
             "\(url.lastPathComponent) is not a git repository."
         case .git(.commandFailed(let code, let stderr)):
             "git exited with code \(code): \(stderr)"
+        case .persistence(.writeFailed(let url, let reason)):
+            "Failed to save \(url.lastPathComponent): \(reason)"
         }
     }
 
