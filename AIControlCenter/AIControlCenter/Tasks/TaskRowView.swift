@@ -54,26 +54,22 @@ struct TaskRowView: View {
             .buttonStyle(.plain)
             .disabled(hasChildren)
 
-            // Title + badges as a Button so it has a well-defined,
+            // Title + inline badges as a Button so it has a well-defined,
             // non-overlapping hit area that doesn't compete with the checkbox.
             // Spacer inside the label stretches the hit area to fill remaining width.
             Button { onSelect(task) } label: {
                 HStack(alignment: .center, spacing: 0) {
-                    VStack(alignment: .leading, spacing: 3) {
+                    HStack(alignment: .center, spacing: 5) {
                         Text(task.title)
                             .font(.body)
                             .foregroundStyle(task.isDone ? .tertiary : .primary)
                             .strikethrough(task.isDone, color: Color.secondary)
                             .lineLimit(1)
-
-                        HStack(spacing: 4) {
-                            scopeBadge(task.scope)
-                            if let cat = category {
-                                badge(cat.name, color: Color(hex: cat.colorHex))
-                            }
-                            if task.priority != .medium {
-                                badge(task.priority.displayName, color: task.priority.color)
-                            }
+                        if let cat = category {
+                            badge(cat.name, color: Color(hex: cat.colorHex))
+                        }
+                        if task.priority != .medium {
+                            badge(task.priority.displayName, color: task.priority.color)
                         }
                     }
                     Spacer(minLength: 0)
@@ -353,22 +349,7 @@ struct TaskRowView: View {
         taskStore.setChildGroupOrder(parentID: task.id, order: keys)
     }
 
-    // MARK: - Badges
-
-    @ViewBuilder
-    private func scopeBadge(_ scope: TaskScope) -> some View {
-        switch scope {
-        case .project(let url): badge(url.lastPathComponent, color: .accentColor)
-        case .group:            badge("Group", color: .purple)
-        case .global:
-            Text("Global")
-                .font(.caption).fontWeight(.medium)
-                .padding(.horizontal, 5).padding(.vertical, 1)
-                .background(Color.secondary.opacity(0.1))
-                .foregroundStyle(.secondary)
-                .clipShape(RoundedRectangle(cornerRadius: 3))
-        }
-    }
+    // MARK: - Badge
 
     private func badge(_ text: String, color: Color) -> some View {
         Text(text)
@@ -400,18 +381,25 @@ private struct SubtaskRowView: View {
             }
             .buttonStyle(.plain)
 
-            // Title + scope as Button with Spacer inside — fills remaining
+            // Title + inline category as Button with Spacer inside — fills remaining
             // width and keeps hit area clearly separated from checkbox.
             Button { onSelect(item) } label: {
                 HStack(alignment: .center, spacing: 0) {
-                    VStack(alignment: .leading, spacing: 2) {
+                    HStack(alignment: .center, spacing: 4) {
                         Text(item.title)
                             .font(.callout)
                             .foregroundStyle(item.isDone ? .tertiary : .secondary)
                             .strikethrough(item.isDone, color: Color.secondary)
                             .lineLimit(1)
-
-                        scopeBadge(item.scope)
+                        if let catID = item.categoryID,
+                           let cat = taskStore.category(id: catID) {
+                            Text(cat.name)
+                                .font(.caption2).fontWeight(.medium)
+                                .padding(.horizontal, 4).padding(.vertical, 1)
+                                .background(Color(hex: cat.colorHex).opacity(0.15))
+                                .foregroundStyle(Color(hex: cat.colorHex))
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                        }
                     }
                     Spacer(minLength: 0)
                 }
@@ -518,31 +506,4 @@ private struct SubtaskRowView: View {
         .frame(width: 220)
     }
 
-    // MARK: - Scope badge
-
-    @ViewBuilder
-    private func scopeBadge(_ scope: TaskScope) -> some View {
-        switch scope {
-        case .project(let url):
-            badge(url.lastPathComponent, color: .accentColor)
-        case .group:
-            badge("Group", color: .purple)
-        case .global:
-            Text("Global")
-                .font(.caption).fontWeight(.medium)
-                .padding(.horizontal, 5).padding(.vertical, 1)
-                .background(Color.secondary.opacity(0.1))
-                .foregroundStyle(.secondary)
-                .clipShape(RoundedRectangle(cornerRadius: 3))
-        }
-    }
-
-    private func badge(_ text: String, color: Color) -> some View {
-        Text(text)
-            .font(.caption).fontWeight(.medium)
-            .padding(.horizontal, 5).padding(.vertical, 1)
-            .background(color.opacity(0.15))
-            .foregroundStyle(color)
-            .clipShape(RoundedRectangle(cornerRadius: 3))
-    }
 }
