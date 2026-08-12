@@ -11,6 +11,7 @@ struct TaskRowView: View {
 
     @State private var showProgressPopover = false
     @State private var draftProgress: Double = 0
+    @State private var collapsedGroupKeys: Set<String> = []
 
     private var category: TaskCategory? {
         task.categoryID.flatMap { taskStore.category(id: $0) }
@@ -21,7 +22,7 @@ struct TaskRowView: View {
         return VStack(spacing: 0) {
             rootRow(hasChildren: !children.isEmpty)
             if isExpanded && !children.isEmpty {
-                subtaskRows(children)
+                groupedSubtaskRows(children)
             }
         }
     }
@@ -207,22 +208,149 @@ struct TaskRowView: View {
         .frame(width: 220)
     }
 
-    // MARK: - Subtask rows
+    // MARK: - Subtask group model
 
-    private func subtaskRows(_ children: [TaskItem]) -> some View {
-        ForEach(children) { child in
-            HStack(spacing: 0) {
-                VStack(spacing: 0) {
-                    Rectangle()
-                        .fill(Color.secondary.opacity(0.2))
-                        .frame(width: 1)
-                }
-                .frame(width: 16)
-                .padding(.leading, 20)
+    private struct SubtaskGroup: Identifiable {
+        let key: String
+        let displayName: String
+        let tasks: [TaskItem]
+        let progress: Int
+        var id: String { key }
+    }
 
-                SubtaskRowView(item: child, taskStore: taskStore, onSelect: onSelect)
+    private func groupDisplayName(for scope: TaskScope) -> String {
+        switch scope {
+        case .project(let url): return url.lastPathComponent
+        case .group(let id):    return taskStore.taskGroup(id: id)?.name ?? "Group"
+        case .global:           return "Global"
+        }
+    }
+
+    private func makeSubtaskGroups(_ children: [TaskItem]) -> [SubtaskGroup] {
+        var keyOrder: [String] = []
+        var dictTasks: [String: [TaskItem]] = [:]
+        var dictName: [String: String] = [:]
+        for child in children {
+            let key = child.scope.groupKey
+            if dictTasks[key] == nil {
+                keyOrder.append(key)
+                dictName[key] = groupDisplayName(for: child.scope)
+                dictTasks[key] = []
+            }
+            dictTasks[key]!.append(child)
+        }
+
+        let storedOrder = taskStore.childGroupOrders[task.id] ?? []
+        var orderedKeys = storedOrder.filter { dictTasks[$0] != nil }
+        for key in keyOrder where !orderedKeys.contains(key) { orderedKeys.append(key) }
+
+        return orderedKeys.compactMap { key -> SubtaskGroup? in
+            guard let tasks = dictTasks[key] else { return nil }
+            let avg = tasks.isEmpty ? 0 : tasks.map(\.progress).reduce(0, +) / tasks.count
+            return SubtaskGroup(key: key, displayName: dictName[key] ?? key, tasks: tasks, progress: avg)
+        }
+    }
+
+    // MARK: - Grouped subtask rows
+
+    private func groupedSubtaskRows(_ children: [TaskItem]) -> some View {
+        let groups = makeSubtaskGroups(children)
+        return VStack(spacing: 0) {
+            ForEach(groups) { group in
+                groupSection(group: group)
+                    .draggable(group.key) {
+                        Text(group.displayName)
+                            .font(.caption)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(.regularMaterial)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    .dropDestination(for: String.self) { droppedKeys, _ in
+                        guard let from = droppedKeys.first, from != group.key else { return false }
+                        reorderGroups(moving: from, before: group.key, in: children)
+                        return true
+                    }
             }
         }
+    }
+
+    private func groupSection(group: SubtaskGroup) -> some View {
+        let isCollapsed = collapsedGroupKeys.contains(group.key)
+        return VStack(spacing: 0) {
+            groupHeader(group: group, isCollapsed: isCollapsed)
+            if !isCollapsed {
+                ForEach(group.tasks) { child in
+                    HStack(spacing: 0) {
+                        VStack(spacing: 0) {
+                            Rectangle()
+                                .fill(Color.secondary.opacity(0.15))
+                                .frame(width: 1)
+                        }
+                        .frame(width: 16)
+                        .padding(.leading, 28)
+                        SubtaskRowView(item: child, taskStore: taskStore, onSelect: onSelect)
+                    }
+                }
+            }
+        }
+    }
+
+    private func groupHeader(group: SubtaskGroup, isCollapsed: Bool) -> some View {
+        HStack(spacing: 5) {
+            Color.clear.frame(width: 20)
+            Button {
+                if collapsedGroupKeys.contains(group.key) {
+                    collapsedGroupKeys.remove(group.key)
+                } else {
+                    collapsedGroupKeys.insert(group.key)
+                }
+            } label: {
+                Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .frame(width: 14, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Text(group.displayName)
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+
+            if !group.tasks.isEmpty {
+                Text("(\(group.tasks.count))")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer()
+
+            Text("\(group.progress)%")
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.tertiary)
+                .frame(width: 30, alignment: .trailing)
+
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 9))
+                .foregroundStyle(.quaternary)
+                .padding(.trailing, 4)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 3)
+        .background(Color.secondary.opacity(0.05))
+        .contentShape(Rectangle())
+    }
+
+    private func reorderGroups(moving fromKey: String, before targetKey: String, in children: [TaskItem]) {
+        var keys = makeSubtaskGroups(children).map(\.key)
+        guard let fromIdx = keys.firstIndex(of: fromKey),
+              keys.contains(targetKey) else { return }
+        keys.remove(at: fromIdx)
+        let insertIdx = keys.firstIndex(of: targetKey) ?? keys.endIndex
+        keys.insert(fromKey, at: insertIdx)
+        taskStore.setChildGroupOrder(parentID: task.id, order: keys)
     }
 
     // MARK: - Badges

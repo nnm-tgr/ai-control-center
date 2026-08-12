@@ -86,6 +86,17 @@ enum TaskScope: Equatable, Hashable, Sendable {
     case global
 }
 
+extension TaskScope {
+    /// Stable string key used to identify a group bucket (for ordering / drag-drop).
+    var groupKey: String {
+        switch self {
+        case .project(let url): return "project:\(url.path)"
+        case .group(let id):    return "group:\(id.uuidString)"
+        case .global:           return "global"
+        }
+    }
+}
+
 extension TaskScope: Codable {
     private enum CodingKeys: String, CodingKey { case kind, url, groupID }
     private enum Kind: String, Codable { case project, group, global }
