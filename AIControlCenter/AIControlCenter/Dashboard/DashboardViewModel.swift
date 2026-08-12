@@ -130,6 +130,36 @@ enum DashboardLayoutStore {
     }
 }
 
+// MARK: - Project Display Filter
+
+/// フィルタリング・検索・ソートのロジックをビューモデルから分離する純粋な値型。
+/// displayedItems の構築はこの struct に委譲する。
+struct ProjectDisplayFilter {
+    var statusGroup: StatusGroup = .all
+    var searchText: String = ""
+    var sortOrder: DashboardViewModel.SortOrder = .statusPriority
+
+    func apply(to projects: [Project]) -> [Project] {
+        var result = projects
+        if statusGroup != .all {
+            result = result.filter { statusGroup.statuses.contains($0.aggregatedStatus) }
+        }
+        if !searchText.isEmpty {
+            let q = searchText.lowercased()
+            result = result.filter { matches($0, query: q) }
+        }
+        result.sort(by: sortOrder.comparator)
+        return result
+    }
+
+    func matches(_ project: Project, query: String) -> Bool {
+        project.name.lowercased().contains(query)
+        || project.primaryAgent?.currentTask?.lowercased().contains(query) == true
+        || project.primaryAgent?.branch?.lowercased().contains(query) == true
+        || project.primaryAgent?.agentType.displayName.lowercased().contains(query) == true
+    }
+}
+
 // MARK: - ViewModel
 
 @Observable
@@ -186,26 +216,12 @@ final class DashboardViewModel {
 
     // MARK: - Computed
 
-    private var filteredProjects: [Project] {
-        guard filterGroup != .all else { return projects }
-        return projects.filter { filterGroup.statuses.contains($0.aggregatedStatus) }
-    }
-
-    private var sortedProjects: [Project] {
-        filteredProjects.sorted(by: sortOrder.comparator)
+    private var displayFilter: ProjectDisplayFilter {
+        ProjectDisplayFilter(statusGroup: filterGroup, searchText: searchText, sortOrder: sortOrder)
     }
 
     private var flatDisplayedProjects: [Project] {
-        guard !searchText.isEmpty else { return sortedProjects }
-        let q = searchText.lowercased()
-        return sortedProjects.filter { matchesSearch($0, query: q) }
-    }
-
-    private func matchesSearch(_ project: Project, query: String) -> Bool {
-        project.name.lowercased().contains(query)
-        || project.primaryAgent?.currentTask?.lowercased().contains(query) == true
-        || project.primaryAgent?.branch?.lowercased().contains(query) == true
-        || project.primaryAgent?.agentType.displayName.lowercased().contains(query) == true
+        displayFilter.apply(to: projects)
     }
 
     var displayedItems: [DashboardItem] {
@@ -213,6 +229,7 @@ final class DashboardViewModel {
             return flatDisplayedProjects.map { .solo($0) }
         }
 
+        let filter = displayFilter
         let projectMap = Dictionary(uniqueKeysWithValues: projects.map { ($0.id, $0) })
         let query = searchText.isEmpty ? nil : searchText.lowercased()
 
@@ -223,13 +240,13 @@ final class DashboardViewModel {
             case .solo(let id):
                 guard let p = projectMap[id] else { continue }
                 guard filterGroup == .all || filterGroup.statuses.contains(p.aggregatedStatus) else { continue }
-                if let q = query, !matchesSearch(p, query: q) { continue }
+                if let q = query, !filter.matches(p, query: q) { continue }
                 items.append(.solo(p))
 
             case .group(let g):
                 var children = g.projectIDs.compactMap { projectMap[$0] }
                 children = children.filter { filterGroup == .all || filterGroup.statuses.contains($0.aggregatedStatus) }
-                if let q = query { children = children.filter { matchesSearch($0, query: q) } }
+                if let q = query { children = children.filter { filter.matches($0, query: q) } }
                 guard !children.isEmpty else { continue }
                 items.append(.group(id: g.id, name: g.name, projects: children, isExpanded: g.isExpanded))
             }
@@ -239,7 +256,7 @@ final class DashboardViewModel {
         let layoutIDs = layout.allProjectIDs
         for p in projects where !layoutIDs.contains(p.id) {
             guard filterGroup == .all || filterGroup.statuses.contains(p.aggregatedStatus) else { continue }
-            if let q = query, !matchesSearch(p, query: q) { continue }
+            if let q = query, !filter.matches(p, query: q) { continue }
             items.append(.solo(p))
         }
 

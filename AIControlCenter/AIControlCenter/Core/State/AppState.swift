@@ -42,6 +42,10 @@ final class AppState {
     private let toolApproval = ToolApprovalService()
     private let settingsStore: SettingsStore
 
+    // MARK: - Watcher task (stored to enable cancellation)
+
+    private var watcherTask: Task<Void, Never>?
+
     // MARK: - Init
 
     init(settingsStore: SettingsStore = SettingsStore()) {
@@ -100,7 +104,11 @@ final class AppState {
                              isGitRepository: $0.isGitRepository, discoveredAt: $0.discoveredAt)
         }
         guard let data = try? JSONEncoder().encode(persisted) else { return }
-        try? data.write(to: url, options: .atomic)
+        do {
+            try data.write(to: url, options: .atomic)
+        } catch {
+            lastError = .persistence(.writeFailed(url: url, reason: error.localizedDescription))
+        }
     }
 
     // MARK: - Lifecycle
@@ -134,6 +142,8 @@ final class AppState {
     }
 
     func stop() {
+        watcherTask?.cancel()
+        watcherTask = nil
         watcher.stop()
         toolApproval.stop()
     }
@@ -155,41 +165,42 @@ final class AppState {
     // MARK: - File Watcher
 
     private func startWatcher() {
+        watcherTask?.cancel()
+        watcherTask = nil
+
         watcher.start(roots: settings.watchedRootURLs, excludedNames: settings.excludedDirectoryNamesSet)
 
-        Task { [weak self] in
+        watcherTask = Task { [weak self] in
             guard let self else { return }
-            // watcher の agentByProjectID 変化を polling で拾う（Sprint 6: AsyncStream 化予定）
-            while !Task.isCancelled {
-                self.applyWatcherUpdates()
-                try? await Task.sleep(for: .seconds(1))
+            for await event in watcher.makeEventStream() {
+                guard !Task.isCancelled else { break }
+                switch event {
+                case .agentUpdated(let projectID, let agent):
+                    self.applyAgentUpdate(projectID: projectID, agent: agent)
+                case .error(let err):
+                    self.lastError = err
+                }
             }
         }
     }
 
-    private func applyWatcherUpdates() {
-        for (projectID, newAgent) in watcher.agentByProjectID {
-            guard let idx = projects.firstIndex(where: { $0.id == projectID }) else { continue }
-            var project = projects[idx]
+    private func applyAgentUpdate(projectID: UUID, agent: Agent) {
+        guard let idx = projects.firstIndex(where: { $0.id == projectID }) else { return }
+        var project = projects[idx]
 
-            // agentType で既存エージェントを照合する
-            // ID は Scanner と Watcher で異なるため ID 照合は不可
-            if let agentIdx = project.agents.firstIndex(where: { $0.agentType == newAgent.agentType }) {
-                let oldAgent = project.agents[agentIdx]
-                project.agents[agentIdx] = newAgent
-                if oldAgent.status != newAgent.status {
-                    recordTransition(from: oldAgent.status, to: newAgent.status, in: project, agent: newAgent)
-                }
-            } else {
-                project.agents.append(newAgent)
+        // agentType で既存エージェントを照合する
+        // ID は Scanner と Watcher で異なるため ID 照合は不可
+        if let agentIdx = project.agents.firstIndex(where: { $0.agentType == agent.agentType }) {
+            let oldAgent = project.agents[agentIdx]
+            project.agents[agentIdx] = agent
+            if oldAgent.status != agent.status {
+                recordTransition(from: oldAgent.status, to: agent.status, in: project, agent: agent)
             }
-            project.lastSeenAt = .now
-            projects[idx] = project
+        } else {
+            project.agents.append(agent)
         }
-
-        if let error = watcher.lastError {
-            lastError = error
-        }
+        project.lastSeenAt = .now
+        projects[idx] = project
     }
 
     // MARK: - Project Merging
@@ -264,11 +275,19 @@ final class AppState {
 
     func updateSettings(_ mutation: (inout Settings) -> Void) {
         let oldRoots = settings.watchedRootURLs
+        let oldExcluded = settings.excludedDirectoryNamesSet
         let oldApprovalEnabled = settings.approvalEnabled
         let oldApprovalTimeout = settings.approvalTimeoutSeconds
         mutation(&settings)
-        watcher.stop()
-        startWatcher()
+
+        // URLリストまたは除外名が変わった場合のみウォッチャーを再起動する（差分更新）
+        let watcherSettingsChanged = settings.watchedRootURLs != oldRoots
+                                     || settings.excludedDirectoryNamesSet != oldExcluded
+        if watcherSettingsChanged {
+            watcher.stop()
+            startWatcher()
+        }
+
         toolApproval.stop()
         toolApproval.start(roots: settings.watchedRootURLs,
                            excludedNames: settings.excludedDirectoryNamesSet)
