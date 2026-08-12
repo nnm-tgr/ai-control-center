@@ -165,6 +165,18 @@ final class DashboardViewModel {
     // MARK: - Layout Sync
 
     func syncLayout() {
+        let knownIDs = Set(projects.map(\.id))
+        // Remove layout entries whose project IDs are no longer tracked.
+        // This cleans up stale entries accumulated by the old non-deterministic projectID.
+        layout.entries = layout.entries.compactMap { entry -> DashboardLayout.Entry? in
+            switch entry {
+            case .solo(let id):
+                return knownIDs.contains(id) ? entry : nil
+            case .group(var g):
+                g.projectIDs = g.projectIDs.filter { knownIDs.contains($0) }
+                return g.projectIDs.isEmpty ? nil : .group(g)
+            }
+        }
         layout.appendNewProjects(projects.map(\.id))
         DashboardLayoutStore.save(layout)
     }
