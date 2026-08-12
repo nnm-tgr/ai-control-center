@@ -14,13 +14,17 @@ struct AppleScriptTerminalProvider: TerminalProvider {
     // MARK: - AppleScript Templates
 
     private func appleScript(for type: TerminalProviderType, path: String) -> String {
-        let escaped = path.replacingOccurrences(of: "\"", with: "\\\"")
+        // Single-quote shell escaping prevents $(), backtick, $VAR, \n injection.
+        // The shell command itself is then wrapped in AppleScript double-quoted string literals.
+        let shellCmd = "cd \(path.shellEscaped)"
+        let asEscaped = shellCmd.replacingOccurrences(of: "\\", with: "\\\\")
+                                .replacingOccurrences(of: "\"", with: "\\\"")
         switch type {
         case .terminal:
             return """
             tell application "Terminal"
                 activate
-                do script "cd \\"\(escaped)\\""
+                do script "\(asEscaped)"
             end tell
             """
         case .iTerm2:
@@ -29,7 +33,7 @@ struct AppleScriptTerminalProvider: TerminalProvider {
                 activate
                 create window with default profile
                 tell current session of current window
-                    write text "cd \\"\(escaped)\\""
+                    write text "\(asEscaped)"
                 end tell
             end tell
             """
@@ -191,7 +195,9 @@ end tell
 
     private func focusByTTY(ttyPath: String) async throws -> Bool {
         let appName = appleScriptAppName
-        let escaped = ttyPath.replacingOccurrences(of: "\"", with: "\\\"")
+        let escaped = ttyPath
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
 
         let script: String
         switch providerType {

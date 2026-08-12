@@ -103,9 +103,12 @@ final class ToolApprovalService {
             decision: decision,
             decidedAt: Date()
         )
-        let approvalURL = request.pendingFileURL
+        // Resolve symlinks on the pending file URL so approval.json is written
+        // into the real directory, not through a symlink that could redirect the
+        // write to an arbitrary location.
+        let resolvedDir = request.pendingFileURL.resolvingSymlinksInPath()
             .deletingLastPathComponent()
-            .appendingPathComponent("approval.json")
+        let approvalURL = resolvedDir.appendingPathComponent("approval.json")
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = .prettyPrinted
