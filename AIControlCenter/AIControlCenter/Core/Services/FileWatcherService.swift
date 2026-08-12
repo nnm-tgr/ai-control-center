@@ -73,19 +73,24 @@ final class FileWatcherService {
 
     /// プロジェクトルート URL から安定した UUID を導出する。
     /// 同じ URL は常に同じ UUID を返す（AppState での Project 紐付けに使用）。
+    ///
+    /// Swift.Hasher はプロセス起動ごとにシードがランダム化されるため使用不可。
+    /// 代わりに FNV-1a 64-bit を 2 パスで走らせ 128-bit に拡張して UUID 全体を埋める。
     static func projectID(for rootURL: URL) -> UUID {
-        let path = rootURL.standardizedFileURL.path
-        var hasher = Hasher()
-        hasher.combine("ai-control-center.project")
-        hasher.combine(path)
-        let h = UInt64(bitPattern: Int64(hasher.finalize()))
-        // UUID の下位 48bit に埋め込む（衝突率は実用上無視できる）
+        let input = "ai-control-center.project:" + rootURL.standardizedFileURL.path
+        let prime: UInt64 = 1099511628211
+        var h0: UInt64 = 14695981039346656037          // FNV offset basis
+        var h1: UInt64 = 14695981039346656037 ^ 0x5555_5555_5555_5555  // independent seed
+        for byte in input.utf8 {
+            h0 ^= UInt64(byte); h0 &*= prime
+            h1 ^= UInt64(byte); h1 &*= prime
+        }
+        func b(_ v: UInt64, _ s: Int) -> UInt8 { UInt8((v >> s) & 0xFF) }
         return UUID(uuid: (
-            0, 0, 0, 0, 0, 0, 0, 0,
-            UInt8((h >> 40) & 0xFF), UInt8((h >> 32) & 0xFF),
-            UInt8((h >> 24) & 0xFF), UInt8((h >> 16) & 0xFF),
-            UInt8((h >> 8)  & 0xFF), UInt8(h & 0xFF),
-            0, 0
+            b(h0,56), b(h0,48), b(h0,40), b(h0,32),
+            b(h0,24), b(h0,16), b(h0, 8), b(h0, 0),
+            b(h1,56), b(h1,48), b(h1,40), b(h1,32),
+            b(h1,24), b(h1,16), b(h1, 8), b(h1, 0)
         ))
     }
 }

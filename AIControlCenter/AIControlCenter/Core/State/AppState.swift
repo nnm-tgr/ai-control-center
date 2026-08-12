@@ -72,10 +72,24 @@ final class AppState {
               let data = try? Data(contentsOf: url),
               let persisted = try? JSONDecoder().decode([PersistedProject].self, from: data)
         else { return }
-        projects = persisted.map {
-            Project(id: $0.id, name: $0.name, rootURL: $0.rootURL,
-                    isGitRepository: $0.isGitRepository, discoveredAt: $0.discoveredAt,
-                    lastSeenAt: $0.discoveredAt, isReachable: false)
+
+        // Deduplicate by rootURL: keep earliest discoveredAt.
+        // Duplicates arise when projectID used a non-deterministic hash (Swift.Hasher)
+        // that produced a different UUID per process launch.
+        var seen: [URL: PersistedProject] = [:]
+        for p in persisted {
+            let key = p.rootURL.standardizedFileURL
+            if seen[key] == nil || p.discoveredAt < seen[key]!.discoveredAt {
+                seen[key] = p
+            }
+        }
+
+        projects = seen.values.map { p -> Project in
+            // Re-derive the ID with the now-stable hash so it matches future scans.
+            let stableID = FileWatcherService.projectID(for: p.rootURL)
+            return Project(id: stableID, name: p.name, rootURL: p.rootURL,
+                           isGitRepository: p.isGitRepository, discoveredAt: p.discoveredAt,
+                           lastSeenAt: p.discoveredAt, isReachable: false)
         }.sorted { $0.name < $1.name }
     }
 
